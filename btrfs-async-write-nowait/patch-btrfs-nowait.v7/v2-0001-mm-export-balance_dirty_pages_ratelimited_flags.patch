@@ -1,0 +1,29 @@
+From 81214e49805a93809fb475ccfe6364776abc0673 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 6 Sep 2022 10:22:51 -0700
+Subject: [PATCH v2 01/12] mm: export balance_dirty_pages_ratelimited_flags()
+
+Export the function balance_dirty_pages_ratelimited_flags(). It is now
+also called from btrfs.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Reported-by: kernel test robot <lkp@intel.com>
+---
+ mm/page-writeback.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 032a7bf8d259..7e9d8d857ecc 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1933,6 +1933,7 @@ int balance_dirty_pages_ratelimited_flags(struct address_space *mapping,
+ 	wb_put(wb);
+ 	return ret;
+ }
++EXPORT_SYMBOL_GPL(balance_dirty_pages_ratelimited_flags);
+ 
+ /**
+  * balance_dirty_pages_ratelimited - balance dirty memory state.
+-- 
+2.30.2
+

@@ -1,0 +1,114 @@
+From 086ab67d13e040d365860be9d5e9f8861ce44ab0 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <josef@toxicpanda.com>
+Date: Mon, 27 Jun 2022 21:58:19 -0400
+Subject: [PATCH v1 05/10] btrfs: make btrfs_check_nocow_lock nowait compatible
+
+Now all the helpers that btrfs_check_nocow_lock uses handle nowait, add
+a nowait flag to btrfs_check_nocow_lock so it can be used by the write
+path.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/ctree.h |  2 +-
+ fs/btrfs/file.c  | 33 ++++++++++++++++++++++-----------
+ fs/btrfs/inode.c |  2 +-
+ 3 files changed, 24 insertions(+), 13 deletions(-)
+
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index 536bbc8551fc..06cb25f2d3bd 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -3482,7 +3482,7 @@ int btrfs_dirty_pages(struct btrfs_inode *inode, struct page **pages,
+ 		      struct extent_state **cached, bool noreserve);
+ int btrfs_fdatawrite_range(struct inode *inode, loff_t start, loff_t end);
+ int btrfs_check_nocow_lock(struct btrfs_inode *inode, loff_t pos,
+-			   size_t *write_bytes);
++			   size_t *write_bytes, bool nowait);
+ void btrfs_check_nocow_unlock(struct btrfs_inode *inode);
+ 
+ /* tree-defrag.c */
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 0f257205c63d..da6742a3c715 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1481,7 +1481,7 @@ lock_and_cleanup_extent_if_need(struct btrfs_inode *inode, struct page **pages,
+  * NOTE: Callers need to call btrfs_check_nocow_unlock() if we return > 0.
+  */
+ int btrfs_check_nocow_lock(struct btrfs_inode *inode, loff_t pos,
+-			   size_t *write_bytes)
++			   size_t *write_bytes, bool nowait)
+ {
+ 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
+ 	struct btrfs_root *root = inode->root;
+@@ -1500,16 +1500,21 @@ int btrfs_check_nocow_lock(struct btrfs_inode *inode, loff_t pos,
+ 			   fs_info->sectorsize) - 1;
+ 	num_bytes = lockend - lockstart + 1;
+ 
+-	btrfs_lock_and_flush_ordered_range(inode, lockstart, lockend, NULL);
++	if (nowait) {
++		if (!btrfs_try_lock_ordered_range(inode, lockstart, lockend)) {
++			btrfs_drew_write_unlock(&root->snapshot_lock);
++			return -EWOULDBLOCK;
++		}
++	} else {
++		btrfs_lock_and_flush_ordered_range(inode, lockstart, lockend, NULL);
++	}
+ 	ret = can_nocow_extent(&inode->vfs_inode, lockstart, &num_bytes,
+-			NULL, NULL, NULL, false, false);
+-	if (ret <= 0) {
+-		ret = 0;
++			NULL, NULL, NULL, nowait, false);
++	if (ret <= 0)
+ 		btrfs_drew_write_unlock(&root->snapshot_lock);
+-	} else {
++	else
+ 		*write_bytes = min_t(size_t, *write_bytes ,
+ 				     num_bytes - pos + lockstart);
+-	}
+ 	unlock_extent(&inode->io_tree, lockstart, lockend);
+ 
+ 	return ret;
+@@ -1666,16 +1671,22 @@ static noinline ssize_t btrfs_buffered_write(struct kiocb *iocb,
+ 						  &data_reserved, pos,
+ 						  write_bytes, false);
+ 		if (ret < 0) {
++			int tmp;
++
+ 			/*
+ 			 * If we don't have to COW at the offset, reserve
+ 			 * metadata only. write_bytes may get smaller than
+ 			 * requested here.
+ 			 */
+-			if (btrfs_check_nocow_lock(BTRFS_I(inode), pos,
+-						   &write_bytes) > 0)
+-				only_release_metadata = true;
+-			else
++			tmp = btrfs_check_nocow_lock(BTRFS_I(inode), pos,
++						     &write_bytes, false);
++			if (tmp < 0)
++				ret = tmp;
++			if (tmp > 0)
++				ret = 0;
++			if (ret)
+ 				break;
++			only_release_metadata = true;
+ 		}
+ 
+ 		num_pages = DIV_ROUND_UP(write_bytes + offset, PAGE_SIZE);
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 36e755f73764..5426d4f4ac23 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -4884,7 +4884,7 @@ int btrfs_truncate_block(struct btrfs_inode *inode, loff_t from, loff_t len,
+ 	ret = btrfs_check_data_free_space(inode, &data_reserved, block_start,
+ 					  blocksize, false);
+ 	if (ret < 0) {
+-		if (btrfs_check_nocow_lock(inode, block_start, &write_bytes) > 0) {
++		if (btrfs_check_nocow_lock(inode, block_start, &write_bytes, false) > 0) {
+ 			/* For nocow case, no need to reserve data space */
+ 			only_release_metadata = true;
+ 		} else {
+-- 
+2.30.2
+

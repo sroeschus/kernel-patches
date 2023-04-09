@@ -1,0 +1,75 @@
+From 464970e65a9b43b4565368fe669cce27440b2958 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 20 Jul 2022 10:43:26 -0700
+Subject: [PATCH v1 00/10] io_uring/btrfs: support async buffered writes
+
+This patch series adds support for async buffered writes when using btrfs as
+well as io_uring. Currently io_uring only supports async buffered writes in
+the slow path (xfs supports async buffered writes in the fast path). In the
+slow path the async buffered writes are processed in the io workers.
+
+To be able to use the fast path the required pages must be already in the page
+cache, the required locks can be granted immediately and no additional blocks
+need to be read from disk.
+
+
+Performance results:
+  For fio the following results have been obtained with a queue depth of 1 and
+  4k block size (runtime 600 secs):
+
+        Sequential writes
+           psync     io_uring (wo patch)  io_uring (w patch)  libaio
+  iops      161K           69K                149K             139K
+  bw        661MB/s       282MB/s             610MB/s          569MB/s
+  clat        4.97us       11us                 0.087us          0.581us
+
+
+Testing:
+  - the xfstests tests suite has been run (/generic, /btrfs, /shared). No new
+    diffs have been discovered compared to a kernel, which does not have the
+    patch series
+  - fsx with 100 million operations completed successfully
+  - various fio tests
+  
+
+Note: Currently this requires some of the patches of async buffered write support
+      for XFS. For public review I'll wait until 5.20 is out. Then we no longer
+      have that requirement.
+
+
+Josef Bacik (5):
+  btrfs: implement a nowait option for tree searches
+  btrfs: make can_nocow_extent nowait compatible
+  btrfs: add the ability to use NO_FLUSH for data reservations
+  btrfs: add btrfs_try_lock_ordered_range
+  btrfs: make btrfs_check_nocow_lock nowait compatible
+
+Stefan Roesch (5):
+  btrfs: make prepare_pages nowait compatible
+  btrfs: make lock_and_cleanup_extent_if_need nowait compatible
+  btrfs: btrfs: plumb NOWAIT through the write path
+  btrfs: make balance_dirty_pages nowait compatible
+  btrfs: enable nowait async buffered writes
+
+ fs/btrfs/block-group.c    |   2 +-
+ fs/btrfs/ctree.c          |  39 +++++++++++-
+ fs/btrfs/ctree.h          |   8 ++-
+ fs/btrfs/delalloc-space.c |  13 +++-
+ fs/btrfs/delalloc-space.h |   3 +-
+ fs/btrfs/extent-tree.c    |   5 ++
+ fs/btrfs/file-item.c      |   4 +-
+ fs/btrfs/file.c           | 124 ++++++++++++++++++++++++++++----------
+ fs/btrfs/inode.c          |  22 ++++---
+ fs/btrfs/locking.c        |  23 +++++++
+ fs/btrfs/locking.h        |   1 +
+ fs/btrfs/ordered-data.c   |  28 +++++++++
+ fs/btrfs/ordered-data.h   |   1 +
+ fs/btrfs/relocation.c     |   2 +-
+ fs/btrfs/scrub.c          |   4 +-
+ fs/btrfs/space-info.c     |   3 +-
+ fs/btrfs/tree-log.c       |   6 +-
+ 17 files changed, 229 insertions(+), 59 deletions(-)
+
+-- 
+2.30.2
+

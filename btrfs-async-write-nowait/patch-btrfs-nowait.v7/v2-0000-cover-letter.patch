@@ -1,0 +1,109 @@
+From 812e5bdb136bd81b3f1e87ec59a81f815e642aa6 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 7 Sep 2022 17:22:22 -0700
+Subject: [PATCH v2 00/12] io-uring/btrfs: support async buffered writes
+
+This patch series adds support for async buffered writes when using both
+btrfs and io-uring. Currently io-uring only supports buffered writes (for btrfs)
+in the slow path, by processing them in the io workers. With this patch series
+it is now possible to support buffered writes in the fast path. To be able to use
+the fast path, the required pages must be in the page cache, the required locks
+in btrfs can be granted immediately and no additional blocks need to be read
+form disk.
+
+This patch series makes use of the changes that have been introduced by a
+previous patch series: "io-uring/xfs: support async buffered writes"
+
+Performance results:
+  For fio the following results have been obtained with a queue depth of
+  1 and 4k block size (runtime 600 secs):
+
+                 sequential writes:
+                 without patch           with patch      libaio     psync
+  iops:              55k                    134k          117K       148K
+  bw:               221MB/s                 538MB/s       469MB/s    592MB/s
+  clat:           15286ns                    82ns         994ns     6340ns
+
+
+For an io depth of 1, the new patch improves throughput by over two times
+(compared to the exiting behavior, where buffered writes are processed by an
+io-worker process) and also the latency is considerably reduced. To achieve the
+same or better performance with the exisiting code an io depth of 4 is required.
+Increasing the iodepth further does not lead to improvements.
+
+
+BTRFS changes:
+ -Add option for NOWAIT IOCB's to tell that searches do not wait on locks. This
+  adds the nowait option to btrfs_path.
+
+ -For NOWAIT buffered writes on PREALLOC or NOCOW extents tell can_nocow_extent()
+  that we don't want to wait on any locks or metadata IO.
+
+ -Support no_flush reservations for nowait buffered writes.
+
+ -Add btrfs_try_lock_ordered_range() function.
+
+ -Add nowait flag to btrfs_check_nocow_lock() to use it in write code path.
+
+ -Add nowait parameter to prepare_pages() function.
+
+ -Plumb nowait through the write code path.
+
+ -Enable nowait buffered writes.
+
+
+Testing:
+  This patch has been tested with xfstests, fsx, fio. xfstests shows no new
+  diffs compared to running without the patch series.
+
+
+Changes:
+
+V2:
+ - Replace EWOULDBLOCK with EAGAIN. In Version 1 it was not used consistently
+ - Export function balance_dirty_pages_ratelimited_flags()
+ - Add asserts/warnings for search functions when nowait is set, but we don't
+   expect that they are invoked with nowait set.
+
+
+Josef Bacik (5):
+  btrfs: implement a nowait option for tree searches
+  btrfs: make can_nocow_extent nowait compatible
+  btrfs: add the ability to use NO_FLUSH for data reservations
+  btrfs: add btrfs_try_lock_ordered_range
+  btrfs: make btrfs_check_nocow_lock nowait compatible
+
+Stefan Roesch (7):
+  mm: export balance_dirty_pages_ratelimited_flags()
+  btrfs: make prepare_pages nowait compatible
+  btrfs: make lock_and_cleanup_extent_if_need nowait compatible
+  btrfs: btrfs: plumb NOWAIT through the write path
+  btrfs: make balance_dirty_pages nowait compatible
+  btrfs: add assert to search functions
+  btrfs: enable nowait async buffered writes
+
+ fs/btrfs/block-group.c    |   2 +-
+ fs/btrfs/ctree.c          |  48 ++++++++++++++-
+ fs/btrfs/ctree.h          |   8 ++-
+ fs/btrfs/delalloc-space.c |  13 +++-
+ fs/btrfs/delalloc-space.h |   3 +-
+ fs/btrfs/extent-tree.c    |   5 ++
+ fs/btrfs/file-item.c      |   4 +-
+ fs/btrfs/file.c           | 124 ++++++++++++++++++++++++++++----------
+ fs/btrfs/inode.c          |  22 ++++---
+ fs/btrfs/locking.c        |  23 +++++++
+ fs/btrfs/locking.h        |   1 +
+ fs/btrfs/ordered-data.c   |  28 +++++++++
+ fs/btrfs/ordered-data.h   |   1 +
+ fs/btrfs/relocation.c     |   2 +-
+ fs/btrfs/scrub.c          |   4 +-
+ fs/btrfs/space-info.c     |   3 +-
+ fs/btrfs/tree-log.c       |   6 +-
+ mm/page-writeback.c       |   1 +
+ 18 files changed, 239 insertions(+), 59 deletions(-)
+
+
+base-commit: 53e99dcff61e1523ec1c3628b2d564ba15d32eb7
+-- 
+2.30.2
+

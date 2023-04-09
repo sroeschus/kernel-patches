@@ -1,0 +1,46 @@
+From 812e5bdb136bd81b3f1e87ec59a81f815e642aa6 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 30 Jun 2022 09:48:42 -0700
+Subject: [PATCH v2 12/12] btrfs: enable nowait async buffered writes
+
+Enable nowait async buffered writes in btrfs_do_write_iter() and
+btrfs_file_open().
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/file.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index fd42ba9de7a7..887497fd524f 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2107,13 +2107,13 @@ ssize_t btrfs_do_write_iter(struct kiocb *iocb, struct iov_iter *from,
+ 	if (BTRFS_FS_ERROR(inode->root->fs_info))
+ 		return -EROFS;
+ 
+-	if ((iocb->ki_flags & IOCB_NOWAIT) && !(iocb->ki_flags & IOCB_DIRECT))
+-		return -EOPNOTSUPP;
+-
+ 	if (sync)
+ 		atomic_inc(&inode->sync_writers);
+ 
+ 	if (encoded) {
++		if (iocb->ki_flags & IOCB_NOWAIT)
++			return -EOPNOTSUPP;
++
+ 		num_written = btrfs_encoded_write(iocb, from, encoded);
+ 		num_sync = encoded->len;
+ 	} else if (iocb->ki_flags & IOCB_DIRECT) {
+@@ -3755,7 +3755,7 @@ static int btrfs_file_open(struct inode *inode, struct file *filp)
+ {
+ 	int ret;
+ 
+-	filp->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC;
++	filp->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC | FMODE_BUF_WASYNC;
+ 
+ 	ret = fsverity_file_open(inode, filp);
+ 	if (ret)
+-- 
+2.30.2
+

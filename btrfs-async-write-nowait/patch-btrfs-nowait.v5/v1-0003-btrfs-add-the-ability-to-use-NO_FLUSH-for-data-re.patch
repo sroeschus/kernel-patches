@@ -1,0 +1,140 @@
+From a55b9795871f1bc0152df0d331f16b839ec17047 Mon Sep 17 00:00:00 2001
+From: Josef Bacik <josef@toxicpanda.com>
+Date: Mon, 27 Jun 2022 21:20:55 -0400
+Subject: [PATCH v1 03/10] btrfs: add the ability to use NO_FLUSH for data
+ reservations
+
+In order to accommodate NOWAIT IOCB's we need to be able to do NO_FLUSH
+data reservations, so plumb this through the delalloc reservation
+system.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/block-group.c    |  2 +-
+ fs/btrfs/delalloc-space.c | 13 ++++++++++---
+ fs/btrfs/delalloc-space.h |  3 ++-
+ fs/btrfs/file.c           |  2 +-
+ fs/btrfs/inode.c          |  4 ++--
+ fs/btrfs/space-info.c     |  3 ++-
+ 6 files changed, 18 insertions(+), 9 deletions(-)
+
+diff --git a/fs/btrfs/block-group.c b/fs/btrfs/block-group.c
+index e0375ba9d0fe..9df51245ba93 100644
+--- a/fs/btrfs/block-group.c
++++ b/fs/btrfs/block-group.c
+@@ -2869,7 +2869,7 @@ static int cache_save_setup(struct btrfs_block_group *block_group,
+ 	cache_size *= fs_info->sectorsize;
+ 
+ 	ret = btrfs_check_data_free_space(BTRFS_I(inode), &data_reserved, 0,
+-					  cache_size);
++					  cache_size, false);
+ 	if (ret)
+ 		goto out_put;
+ 
+diff --git a/fs/btrfs/delalloc-space.c b/fs/btrfs/delalloc-space.c
+index 1e8f17ff829e..118b2e20b2e1 100644
+--- a/fs/btrfs/delalloc-space.c
++++ b/fs/btrfs/delalloc-space.c
+@@ -127,9 +127,11 @@ int btrfs_alloc_data_chunk_ondemand(struct btrfs_inode *inode, u64 bytes)
+ }
+ 
+ int btrfs_check_data_free_space(struct btrfs_inode *inode,
+-			struct extent_changeset **reserved, u64 start, u64 len)
++				struct extent_changeset **reserved, u64 start,
++				u64 len, bool noflush)
+ {
+ 	struct btrfs_fs_info *fs_info = inode->root->fs_info;
++	enum btrfs_reserve_flush_enum flush = BTRFS_RESERVE_FLUSH_DATA;
+ 	int ret;
+ 
+ 	/* align the range */
+@@ -137,7 +139,12 @@ int btrfs_check_data_free_space(struct btrfs_inode *inode,
+ 	      round_down(start, fs_info->sectorsize);
+ 	start = round_down(start, fs_info->sectorsize);
+ 
+-	ret = btrfs_alloc_data_chunk_ondemand(inode, len);
++	if (noflush)
++		flush = BTRFS_RESERVE_NO_FLUSH;
++	else if (btrfs_is_free_space_inode(inode))
++		flush = BTRFS_RESERVE_FLUSH_FREE_SPACE_INODE;
++
++	ret = btrfs_reserve_data_bytes(fs_info, len, flush);
+ 	if (ret < 0)
+ 		return ret;
+ 
+@@ -454,7 +461,7 @@ int btrfs_delalloc_reserve_space(struct btrfs_inode *inode,
+ {
+ 	int ret;
+ 
+-	ret = btrfs_check_data_free_space(inode, reserved, start, len);
++	ret = btrfs_check_data_free_space(inode, reserved, start, len, false);
+ 	if (ret < 0)
+ 		return ret;
+ 	ret = btrfs_delalloc_reserve_metadata(inode, len, len, false);
+diff --git a/fs/btrfs/delalloc-space.h b/fs/btrfs/delalloc-space.h
+index 28bf5c3ef430..e07d46043455 100644
+--- a/fs/btrfs/delalloc-space.h
++++ b/fs/btrfs/delalloc-space.h
+@@ -7,7 +7,8 @@ struct extent_changeset;
+ 
+ int btrfs_alloc_data_chunk_ondemand(struct btrfs_inode *inode, u64 bytes);
+ int btrfs_check_data_free_space(struct btrfs_inode *inode,
+-			struct extent_changeset **reserved, u64 start, u64 len);
++			struct extent_changeset **reserved, u64 start, u64 len,
++			bool noflush);
+ void btrfs_free_reserved_data_space(struct btrfs_inode *inode,
+ 			struct extent_changeset *reserved, u64 start, u64 len);
+ void btrfs_delalloc_release_space(struct btrfs_inode *inode,
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index f4aa198f0f87..0f257205c63d 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1664,7 +1664,7 @@ static noinline ssize_t btrfs_buffered_write(struct kiocb *iocb,
+ 		extent_changeset_release(data_reserved);
+ 		ret = btrfs_check_data_free_space(BTRFS_I(inode),
+ 						  &data_reserved, pos,
+-						  write_bytes);
++						  write_bytes, false);
+ 		if (ret < 0) {
+ 			/*
+ 			 * If we don't have to COW at the offset, reserve
+diff --git a/fs/btrfs/inode.c b/fs/btrfs/inode.c
+index 8ad3bea26652..36e755f73764 100644
+--- a/fs/btrfs/inode.c
++++ b/fs/btrfs/inode.c
+@@ -4882,7 +4882,7 @@ int btrfs_truncate_block(struct btrfs_inode *inode, loff_t from, loff_t len,
+ 	block_end = block_start + blocksize - 1;
+ 
+ 	ret = btrfs_check_data_free_space(inode, &data_reserved, block_start,
+-					  blocksize);
++					  blocksize, false);
+ 	if (ret < 0) {
+ 		if (btrfs_check_nocow_lock(inode, block_start, &write_bytes) > 0) {
+ 			/* For nocow case, no need to reserve data space */
+@@ -7767,7 +7767,7 @@ static int btrfs_dio_iomap_begin(struct inode *inode, loff_t start,
+ 	if (write && !(flags & IOMAP_NOWAIT)) {
+ 		ret = btrfs_check_data_free_space(BTRFS_I(inode),
+ 						  &dio_data->data_reserved,
+-						  start, data_alloc_len);
++						  start, data_alloc_len, false);
+ 		if (!ret)
+ 			dio_data->data_space_reserved = true;
+ 		else if (ret && !(BTRFS_I(inode)->flags &
+diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
+index d0cbeb7ae81c..0738e1efed79 100644
+--- a/fs/btrfs/space-info.c
++++ b/fs/btrfs/space-info.c
+@@ -1737,7 +1737,8 @@ int btrfs_reserve_data_bytes(struct btrfs_fs_info *fs_info, u64 bytes,
+ 	int ret;
+ 
+ 	ASSERT(flush == BTRFS_RESERVE_FLUSH_DATA ||
+-	       flush == BTRFS_RESERVE_FLUSH_FREE_SPACE_INODE);
++	       flush == BTRFS_RESERVE_FLUSH_FREE_SPACE_INODE ||
++	       flush == BTRFS_RESERVE_NO_FLUSH);
+ 	ASSERT(!current->journal_info || flush != BTRFS_RESERVE_FLUSH_DATA);
+ 
+ 	ret = __reserve_bytes(fs_info, data_sinfo, bytes, flush);
+-- 
+2.30.2
+

@@ -1,0 +1,80 @@
+From 9feeb8863bb541ef7b6c0dec96aab6d95a9ab16b Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Jul 2022 18:31:04 -0700
+Subject: [PATCH v1 08/10] btrfs: btrfs: plumb NOWAIT through the write path
+
+We have everywhere setup for nowait, except prepare_pages which needs to
+be fixed.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/file.c | 19 +++++++++++++------
+ 1 file changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index ef9175efbf99..0789ef9f083b 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -1653,8 +1653,9 @@ static noinline ssize_t btrfs_buffered_write(struct kiocb *iocb,
+ 	bool force_page_uptodate = false;
+ 	loff_t old_isize = i_size_read(inode);
+ 	unsigned int ilock_flags = 0;
++	bool nowait = iocb->ki_flags & IOCB_NOWAIT;
+ 
+-	if (iocb->ki_flags & IOCB_NOWAIT)
++	if (nowait)
+ 		ilock_flags |= BTRFS_ILOCK_TRY;
+ 
+ 	ret = btrfs_inode_lock(inode, ilock_flags);
+@@ -1710,17 +1711,22 @@ static noinline ssize_t btrfs_buffered_write(struct kiocb *iocb,
+ 		extent_changeset_release(data_reserved);
+ 		ret = btrfs_check_data_free_space(BTRFS_I(inode),
+ 						  &data_reserved, pos,
+-						  write_bytes, false);
++						  write_bytes, nowait);
+ 		if (ret < 0) {
+ 			int tmp;
+ 
++			if (nowait && (ret == -ENOSPC || ret == -EWOULDBLOCK)) {
++				ret = -EAGAIN;
++				break;
++			}
++
+ 			/*
+ 			 * If we don't have to COW at the offset, reserve
+ 			 * metadata only. write_bytes may get smaller than
+ 			 * requested here.
+ 			 */
+ 			tmp = btrfs_check_nocow_lock(BTRFS_I(inode), pos,
+-						     &write_bytes, false);
++						     &write_bytes, nowait);
+ 			if (tmp < 0)
+ 				ret = tmp;
+ 			if (tmp > 0)
+@@ -1737,7 +1743,7 @@ static noinline ssize_t btrfs_buffered_write(struct kiocb *iocb,
+ 		WARN_ON(reserve_bytes == 0);
+ 		ret = btrfs_delalloc_reserve_metadata(BTRFS_I(inode),
+ 						      reserve_bytes,
+-						      reserve_bytes, false);
++						      reserve_bytes, nowait);
+ 		if (ret) {
+ 			if (!only_release_metadata)
+ 				btrfs_free_reserved_data_space(BTRFS_I(inode),
+@@ -1767,10 +1773,11 @@ static noinline ssize_t btrfs_buffered_write(struct kiocb *iocb,
+ 		extents_locked = lock_and_cleanup_extent_if_need(
+ 				BTRFS_I(inode), pages,
+ 				num_pages, pos, write_bytes, &lockstart,
+-				&lockend, false, &cached_state);
++				&lockend, nowait, &cached_state);
+ 		if (extents_locked < 0) {
+-			if (extents_locked == -EAGAIN)
++			if (!nowait && extents_locked == -EAGAIN)
+ 				goto again;
++
+ 			btrfs_delalloc_release_extents(BTRFS_I(inode),
+ 						       reserve_bytes);
+ 			ret = extents_locked;
+-- 
+2.30.2
+
