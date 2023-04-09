@@ -1,0 +1,42 @@
+From 28c81d10b917b33231b87c1f64a9d314b5b8c6ff Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 5 Oct 2022 15:42:43 -0700
+Subject: [RFC PATCH v1 14/14] mm: document new /sys/class/bdi/<bdi>/min_bytes
+ knob
+
+This documents the new /sys/class/bdi/<bdi>/min_bytes knob.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ Documentation/ABI/testing/sysfs-class-bdi | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/Documentation/ABI/testing/sysfs-class-bdi b/Documentation/ABI/testing/sysfs-class-bdi
+index 238c1c77958e..f8bdada8d381 100644
+--- a/Documentation/ABI/testing/sysfs-class-bdi
++++ b/Documentation/ABI/testing/sysfs-class-bdi
+@@ -57,6 +57,21 @@ Description:
+ 
+ 	(read-write)
+ 
++What:		/sys/class/bdi/<bdi>/min_bytes
++Date:		October 2022
++Contact:	Stefan Roesch <shr@devkernel.io>
++Description:
++	Under normal circumstances each device is given a part of the
++	total write-back cache that relates to its current average
++	writeout speed in relation to the other devices.
++
++	The 'min_bytes' parameter allows assigning a minimum
++	percentage of the write-back cache to a particular device
++    expressed in bytes.
++	For example, this is useful for providing a minimum QoS.
++
++	(read-write)
++
+ What:		/sys/class/bdi/<bdi>/max_bytes
+ Date:		October 2022
+ Contact:	Stefan Roesch <shr@devkernel.io>
+-- 
+2.30.2
+

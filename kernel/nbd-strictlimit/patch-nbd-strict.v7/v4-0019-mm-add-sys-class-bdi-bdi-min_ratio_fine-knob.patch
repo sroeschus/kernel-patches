@@ -1,0 +1,54 @@
+From 3b2dfb8dabde8aa56bd4c7e41df35a5f797b5870 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Thu, 17 Nov 2022 11:56:41 -0800
+Subject: [RFC PATCH v4 19/20] mm: add /sys/class/bdi/<bdi>/min_ratio_fine knob
+
+This adds the min_ratio_fine knob. The knob specifies the values not
+based on 1 of 100, but instead 1 per million.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ mm/backing-dev.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/mm/backing-dev.c b/mm/backing-dev.c
+index 94c2382367cf..a53b9360b72e 100644
+--- a/mm/backing-dev.c
++++ b/mm/backing-dev.c
+@@ -180,6 +180,25 @@ static ssize_t min_ratio_store(struct device *dev,
+ }
+ BDI_SHOW(min_ratio, bdi->min_ratio / BDI_RATIO_SCALE)
+ 
++static ssize_t min_ratio_fine_store(struct device *dev,
++		struct device_attribute *attr, const char *buf, size_t count)
++{
++	struct backing_dev_info *bdi = dev_get_drvdata(dev);
++	unsigned int ratio;
++	ssize_t ret;
++
++	ret = kstrtouint(buf, 10, &ratio);
++	if (ret < 0)
++		return ret;
++
++	ret = bdi_set_min_ratio_no_scale(bdi, ratio);
++	if (!ret)
++		ret = count;
++
++	return ret;
++}
++BDI_SHOW(min_ratio_fine, bdi->min_ratio)
++
+ static ssize_t max_ratio_store(struct device *dev,
+ 		struct device_attribute *attr, const char *buf, size_t count)
+ {
+@@ -315,6 +334,7 @@ static DEVICE_ATTR_RW(strict_limit);
+ static struct attribute *bdi_dev_attrs[] = {
+ 	&dev_attr_read_ahead_kb.attr,
+ 	&dev_attr_min_ratio.attr,
++	&dev_attr_min_ratio_fine.attr,
+ 	&dev_attr_max_ratio.attr,
+ 	&dev_attr_max_ratio_fine.attr,
+ 	&dev_attr_min_bytes.attr,
+-- 
+2.30.2
+

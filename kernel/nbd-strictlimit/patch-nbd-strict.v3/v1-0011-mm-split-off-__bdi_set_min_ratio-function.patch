@@ -1,0 +1,43 @@
+From b0f9c5d15c70f00d03ae1a6b58301ea89a6b658a Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 5 Oct 2022 16:31:32 -0700
+Subject: [RFC PATCH v1 11/14] mm: split off __bdi_set_min_ratio() function
+
+This splits off the __bdi_set_min_ratio() function from the
+bdi_set_min_ratio() function. The __bdi_set_min_ratio() function will
+also be called from the bdi_set_min_bytes() function, which will be
+introduced in the next patch.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ mm/page-writeback.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index a37a25994ad8..7733dcf96d7e 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -684,7 +684,7 @@ static unsigned long long bdi_get_bytes(unsigned int ratio)
+ 	return bytes;
+ }
+ 
+-int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio)
++static int __bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio)
+ {
+ 	unsigned int delta;
+ 	int ret = 0;
+@@ -730,6 +730,11 @@ static int __bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned int max_ra
+ 	return ret;
+ }
+ 
++int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio)
++{
++	return __bdi_set_min_ratio(bdi, min_ratio * BDI_RATIO_SCALE);
++}
++
+ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned int max_ratio)
+ {
+ 	if (max_ratio > 100)
+-- 
+2.30.2
+

@@ -1,0 +1,81 @@
+From 24ff1e9517573e40ac0ec55984b1134511193281 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Mon, 24 Oct 2022 11:07:49 -0700
+Subject: [RFC PATCH v3 00/14] mm/block: add bdi sysfs knobs
+
+At meta network block devices (nbd) are used to implement remote block
+storage. In testing and during production it has been observed that
+these network block devices can consume a huge portion of the dirty
+writeback cache and writeback can take a considerable time.
+
+To be able to give stricter limits, I'm proposing the following changes:
+
+1) introduce strictlimit knob
+
+  Currently the max_ratio knob exists to limit the dirty_memory. However
+  this knob only applies once (dirty_ratio + dirty_background_ratio) / 2
+  has been reached.
+  With the BDI_CAP_STRICTLIMIT flag, the max_ratio can be applied without
+  reaching that limit. This change exposes that knob.
+
+  This knob can also be useful for NFS, fuse filesystems and USB devices.
+
+2) Use part of 1000 internal calculation
+
+  The max_ratio is based on percentage. With the current machine sizes
+  percentage values can be very high (1% of a 256GB main memory is already
+  2.5GB). This change uses part of 1000 instead of percentages for the
+  internal calculations.
+
+3) Introduce two new sysfs knobs: min_bytes and max_bytes.
+
+  Currently all calculations are based on ratio, but for a user it often
+  more convenient to specify a limit in bytes. The new knobs will not
+  store bytes values, instead they will translate the byte value to a
+  corresponding ratio. As the internal values are now part of 1000, the
+  ratio is closer to the specified value. However the value should be more
+  seen as an approximation as it can fluctuate over time.
+
+
+
+Changes:
+  V3:
+  - change signature of function bdi_ratio_from_pages to take an unsigned long
+    parameter
+  - use div64_u64 function for division to support 32 bit platforms
+  - Refreshed to 6.1-rc2
+  
+  V2:
+  - Refreshed to 6.1-rc1
+  - Use part of 1000, instead of part of 10000
+  - Reformat cover letter
+
+*** BLURB HERE ***
+
+Stefan Roesch (14):
+  mm: add bdi_set_strict_limit() function
+  mm: add knob /sys/class/bdi/<bdi>/strict_limit
+  mm: document /sys/class/bdi/<bdi>/strict_limit knob
+  mm: use part per 1000 for bdi ratios.
+  mm: add bdi_get_max_bytes() function
+  mm: split off __bdi_set_max_ratio() function
+  mm: add bdi_set_max_bytes() function.
+  mm: add knob /sys/class/bdi/<bdi>/max_bytes
+  mm: document /sys/class/bdi/<bdi>/max_bytes knob
+  mm: add bdi_get_min_bytes() function.
+  mm: split off __bdi_set_min_ratio() function
+  mm: add bdi_set_min_bytes() function
+  mm: add /sys/class/bdi/<bdi>/min_bytes knob
+  mm: document /sys/class/bdi/<bdi>/min_bytes knob
+
+ Documentation/ABI/testing/sysfs-class-bdi |  40 +++++++
+ include/linux/backing-dev.h               |   8 ++
+ mm/backing-dev.c                          |  93 +++++++++++++++-
+ mm/page-writeback.c                       | 127 ++++++++++++++++++++--
+ 4 files changed, 254 insertions(+), 14 deletions(-)
+
+
+base-commit: 247f34f7b80357943234f93f247a1ae6b6c3a740
+-- 
+2.30.2
+

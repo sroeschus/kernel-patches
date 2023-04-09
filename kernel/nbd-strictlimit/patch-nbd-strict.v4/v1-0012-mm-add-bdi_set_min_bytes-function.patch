@@ -1,0 +1,56 @@
+From 44da543fcf1c997496ba55e8f4a47560554eadb3 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 5 Oct 2022 16:34:12 -0700
+Subject: [RFC PATCH v1 12/14] mm: add bdi_set_min_bytes() function
+
+This introduces the bdi_set_min_bytes() function. The min_bytes function
+does not store the min_bytes value. Instead it converts the min_bytes
+value into the corresponding ratio value.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/linux/backing-dev.h |  1 +
+ mm/page-writeback.c         | 15 +++++++++++++++
+ 2 files changed, 16 insertions(+)
+
+diff --git a/include/linux/backing-dev.h b/include/linux/backing-dev.h
+index cdb131b57fcb..8db058f331bc 100644
+--- a/include/linux/backing-dev.h
++++ b/include/linux/backing-dev.h
+@@ -109,6 +109,7 @@ unsigned long long bdi_get_min_bytes(struct backing_dev_info *bdi);
+ unsigned long long bdi_get_max_bytes(struct backing_dev_info *bdi);
+ int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio);
+ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned int max_ratio);
++int bdi_set_min_bytes(struct backing_dev_info *bdi, unsigned long long min_bytes);
+ int bdi_set_max_bytes(struct backing_dev_info *bdi, unsigned long long max_bytes);
+ int bdi_set_strict_limit(struct backing_dev_info *bdi, unsigned int strict_limit);
+ 
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 7733dcf96d7e..04c4a142098b 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -750,6 +750,21 @@ unsigned long long bdi_get_min_bytes(struct backing_dev_info *bdi)
+ }
+ EXPORT_SYMBOL_GPL(bdi_get_min_bytes);
+ 
++int bdi_set_min_bytes(struct backing_dev_info *bdi, unsigned long long min_bytes)
++{
++	int ret;
++	unsigned long pages = min_bytes >> PAGE_SHIFT;
++	unsigned long min_ratio;
++
++	ret = bdi_check_pages_limit(pages);
++	if (ret)
++		return ret;
++
++	min_ratio = bdi_ratio_from_pages(pages);
++	return __bdi_set_min_ratio(bdi, min_ratio);
++}
++EXPORT_SYMBOL_GPL(bdi_set_min_bytes);
++
+ unsigned long long bdi_get_max_bytes(struct backing_dev_info *bdi)
+ {
+ 	return bdi_get_bytes(bdi->max_ratio);
+-- 
+2.30.2
+

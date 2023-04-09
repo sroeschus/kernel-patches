@@ -1,0 +1,38 @@
+From 96801b40b495b2cb3136241b882c6f563ed1ddb1 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Thu, 29 Sep 2022 21:45:18 -0700
+Subject: [RFC PATCH v4 03/20] mm: document /sys/class/bdi/<bdi>/strict_limit
+ knob
+
+This documents the new /sys/class/bdi/<bdi>/strict_limit knob.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ Documentation/ABI/testing/sysfs-class-bdi | 11 +++++++++++
+ 1 file changed, 11 insertions(+)
+
+diff --git a/Documentation/ABI/testing/sysfs-class-bdi b/Documentation/ABI/testing/sysfs-class-bdi
+index 6d2a2fc189dd..68b5d4018c2f 100644
+--- a/Documentation/ABI/testing/sysfs-class-bdi
++++ b/Documentation/ABI/testing/sysfs-class-bdi
+@@ -55,6 +55,17 @@ Description:
+ 	mount that is prone to get stuck, or a FUSE mount which cannot
+ 	be trusted to play fair.
+ 
++	(read-write)
++What:		/sys/class/bdi/<bdi>/strict_limit
++Date:		October 2022
++Contact:	Stefan Roesch <shr@devkernel.io>
++Description:
++	Forces per-BDI checks for the share of given device in the write-back
++	cache even before the global background dirty limit is reached. This
++	is useful in situations where the global limit is much higher than
++	affordable for given relatively slow (or untrusted) device. Turning
++	strictlimit on has no visible effect if max_ratio is equal to 100%.
++
+ 	(read-write)
+ What:		/sys/class/bdi/<bdi>/stable_pages_required
+ Date:		January 2008
+-- 
+2.30.2
+

@@ -1,0 +1,103 @@
+From b5bcd6fbd825374560a0edebf684a7560c5684e7 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Fri, 18 Nov 2022 16:43:24 -0800
+Subject: [RFC PATCH v4 00/20] mm/block: add bdi sysfs knobs
+
+At meta network block devices (nbd) are used to implement remote block
+storage. In testing and during production it has been observed that
+these network block devices can consume a huge portion of the dirty
+writeback cache and writeback can take a considerable time.
+
+To be able to give stricter limits, I'm proposing the following changes:
+
+1) introduce strictlimit knob
+
+  Currently the max_ratio knob exists to limit the dirty_memory. However
+  this knob only applies once (dirty_ratio + dirty_background_ratio) / 2
+  has been reached.
+  With the BDI_CAP_STRICTLIMIT flag, the max_ratio can be applied without
+  reaching that limit. This change exposes that knob.
+
+  This knob can also be useful for NFS, fuse filesystems and USB devices.
+
+2) Use part of 1000000 internal calculation
+
+  The max_ratio is based on percentage. With the current machine sizes
+  percentage values can be very high (1% of a 256GB main memory is already
+  2.5GB). This change uses part of 1000000 instead of percentages for the
+  internal calculations.
+
+3) Introduce two new sysfs knobs: min_bytes and max_bytes.
+
+  Currently all calculations are based on ratio, but for a user it often
+  more convenient to specify a limit in bytes. The new knobs will not
+  store bytes values, instead they will translate the byte value to a
+  corresponding ratio. As the internal values are now part of 1000, the
+  ratio is closer to the specified value. However the value should be more
+  seen as an approximation as it can fluctuate over time.
+
+
+3) Introduce two new sysfs knobs: min_ratio_fine and max_ratio_fine.
+
+  The granularity for the existing sysfs bdi knobs min_ratio and max_ratio
+  is based on percentage values. The new sysfs bdi knobs min_ratio_fine
+  and max_ratio_fine allow to specify the ratio as part of 1 million.
+
+Changes:
+  V4:
+  - Introduced two new sysfs knobs min_ratio_fine and max_ratio_fine to allow
+    setting ratios with smaller granularity
+  - Refreshed to 6.1-rc5
+  - removed bdi_set_strict_limit export
+  - removed bdi_get_max_bytes export
+  - removed bdi_set_max_bytes export
+  - change granularity to part of 1000000
+  - changed function signature of bdi_get_max_bytes() to return u64
+  - Fixed commit message of
+    "mm: split off __bdi_set_max_ratio() function"
+  - changed check in bdi_check_pages_limit()
+  V3:
+  - change signature of function bdi_ratio_from_pages to take an unsigned long
+    parameter
+  - use div64_u64 function for division to support 32 bit platforms
+  - Refreshed to 6.1-rc2
+
+  V2:
+  - Refreshed to 6.1-rc1
+  - Use part of 1000, instead of part of 10000
+  - Reformat cover letter
+
+
+Stefan Roesch (20):
+  mm: add bdi_set_strict_limit() function
+  mm: add knob /sys/class/bdi/<bdi>/strict_limit
+  mm: document /sys/class/bdi/<bdi>/strict_limit knob
+  mm: use part per 1000000 for bdi ratios.
+  mm: add bdi_get_max_bytes() function
+  mm: split off __bdi_set_max_ratio() function
+  mm: add bdi_set_max_bytes() function.
+  mm: add knob /sys/class/bdi/<bdi>/max_bytes
+  mm: document /sys/class/bdi/<bdi>/max_bytes knob
+  mm: add bdi_get_min_bytes() function.
+  mm: split off __bdi_set_min_ratio() function
+  mm: add bdi_set_min_bytes() function
+  mm: add /sys/class/bdi/<bdi>/min_bytes knob
+  mm: document /sys/class/bdi/<bdi>/min_bytes knob
+  mm: add bdi_set_max_ratio_no_scale() function
+  mm: add /sys/class/bdi/<bdi>/max_ratio_fine knob
+  mm: document /sys/class/bdi/<bdi>/max_ratio_fine knob
+  mm: add bdi_set_min_ratio_no_scale() function
+  mm: add /sys/class/bdi/<bdi>/min_ratio_fine knob
+  mm: document /sys/class/bdi/<bdi>/min_ratio_fine knob
+
+ Documentation/ABI/testing/sysfs-class-bdi |  68 +++++++++++
+ include/linux/backing-dev.h               |  10 ++
+ mm/backing-dev.c                          | 133 +++++++++++++++++++++-
+ mm/page-writeback.c                       | 130 +++++++++++++++++++--
+ 4 files changed, 329 insertions(+), 12 deletions(-)
+
+
+base-commit: ab290eaddc4c41b237b9a366fa6a5527be890b84
+-- 
+2.30.2
+

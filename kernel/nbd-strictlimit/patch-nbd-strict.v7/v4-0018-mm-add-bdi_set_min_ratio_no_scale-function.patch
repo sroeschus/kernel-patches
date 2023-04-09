@@ -1,0 +1,55 @@
+From 16895e785b9484f2f020a6951651328cfebdf743 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Thu, 17 Nov 2022 11:54:54 -0800
+Subject: [RFC PATCH v4 18/20] mm: add bdi_set_min_ratio_no_scale() function
+
+This introduces bdi_set_min_ratio_no_scale(). It uses the max
+granularity for the ratio. This function by the new sysfs knob
+min_ratio_fine.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/linux/backing-dev.h | 1 +
+ mm/page-writeback.c         | 7 +++++++
+ 2 files changed, 8 insertions(+)
+
+diff --git a/include/linux/backing-dev.h b/include/linux/backing-dev.h
+index d9acbb22ff25..fbad4fcd408e 100644
+--- a/include/linux/backing-dev.h
++++ b/include/linux/backing-dev.h
+@@ -109,6 +109,7 @@ u64 bdi_get_min_bytes(struct backing_dev_info *bdi);
+ u64 bdi_get_max_bytes(struct backing_dev_info *bdi);
+ int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio);
+ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned int max_ratio);
++int bdi_set_min_ratio_no_scale(struct backing_dev_info *bdi, unsigned int min_ratio);
+ int bdi_set_max_ratio_no_scale(struct backing_dev_info *bdi, unsigned int max_ratio);
+ int bdi_set_min_bytes(struct backing_dev_info *bdi, u64 min_bytes);
+ int bdi_set_max_bytes(struct backing_dev_info *bdi, u64 max_bytes);
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index f44ade72966c..ad608ef2a243 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -690,6 +690,8 @@ static int __bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ra
+ 	unsigned int delta;
+ 	int ret = 0;
+ 
++	if (min_ratio > 100 * BDI_RATIO_SCALE)
++		return -EINVAL;
+ 	min_ratio *= BDI_RATIO_SCALE;
+ 
+ 	spin_lock_bh(&bdi_lock);
+@@ -734,6 +736,11 @@ static int __bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned int max_ra
+ 	return ret;
+ }
+ 
++int bdi_set_min_ratio_no_scale(struct backing_dev_info *bdi, unsigned int min_ratio)
++{
++	return __bdi_set_min_ratio(bdi, min_ratio);
++}
++
+ int bdi_set_max_ratio_no_scale(struct backing_dev_info *bdi, unsigned int max_ratio)
+ {
+ 	return __bdi_set_max_ratio(bdi, max_ratio);
+-- 
+2.30.2
+

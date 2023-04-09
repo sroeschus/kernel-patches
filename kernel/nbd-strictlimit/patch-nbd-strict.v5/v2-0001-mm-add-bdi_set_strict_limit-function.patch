@@ -1,0 +1,56 @@
+From 6cbc4b02a6906032b7e224b70136d10b12fb0c6d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Thu, 29 Sep 2022 21:33:36 -0700
+Subject: [RFC PATCH v2 01/14] mm: add bdi_set_strict_limit() function
+
+This adds the bdi_set_strict_limit function to be able to set/unset the
+BDI_CAP_STRICTLIMIT flag.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/linux/backing-dev.h |  1 +
+ mm/page-writeback.c         | 16 ++++++++++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/include/linux/backing-dev.h b/include/linux/backing-dev.h
+index 439815cc1ab9..9c984ffc8a0a 100644
+--- a/include/linux/backing-dev.h
++++ b/include/linux/backing-dev.h
+@@ -104,6 +104,7 @@ static inline unsigned long wb_stat_error(void)
+ 
+ int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio);
+ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned int max_ratio);
++int bdi_set_strict_limit(struct backing_dev_info *bdi, unsigned int strict_limit);
+ 
+ /*
+  * Flags in backing_dev_info::capability
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 7e9d8d857ecc..e22aae0ecacd 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -698,6 +698,22 @@ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned max_ratio)
+ }
+ EXPORT_SYMBOL(bdi_set_max_ratio);
+ 
++int bdi_set_strict_limit(struct backing_dev_info *bdi, unsigned int strict_limit)
++{
++	if (strict_limit > 1)
++		return -EINVAL;
++
++	spin_lock_bh(&bdi_lock);
++	if (strict_limit)
++		bdi->capabilities |= BDI_CAP_STRICTLIMIT;
++	else
++		bdi->capabilities &= ~BDI_CAP_STRICTLIMIT;
++	spin_unlock_bh(&bdi_lock);
++
++	return 0;
++}
++EXPORT_SYMBOL_GPL(bdi_set_strict_limit);
++
+ static unsigned long dirty_freerun_ceiling(unsigned long thresh,
+ 					   unsigned long bg_thresh)
+ {
+-- 
+2.30.2
+

@@ -1,0 +1,59 @@
+From b98b917cf879f914e9b316e7b4f3ebef53bcaca0 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Mon, 10 Oct 2022 17:37:06 -0700
+Subject: [RFC PATCH v1 00/14] mm/block: add bdi sysfs knobs
+
+At meta network block devices (nbd) are used to implement remote block storage. In testing
+and during production it has been observed that these network block devices can consume
+a huge portion of the dirty writeback and writeback can take a considerable time.
+
+To give stricter limits, I'm proposing the following changes and new sysfs knobs:
+
+1) strictlimit knob
+  Currently the max_ratio knob exists to limit the dirty_memory. However this knob
+  only applies once (dirty_ratio + dirty_background_ratio) / 2 has been reached.
+  With the BDI_CAP_STRICTLIMIT flag, the max_ratio can be applied without reaching
+  that limit. This change exposes that knob.
+
+  This knob can also be useful for NFS, fuse filesystems and USB devices.
+
+2) Part of 10000 internal calculation
+  The max_ratio is based on percentage. With the current machine sizes percentage
+  values can be very high (1% of a 256GB main memory is already 2.5GB). This change
+  uses part of 10000 instead of percentages for the internal calculations.
+
+3) Introduce two new knobs: min_bytes and max_bytes.
+  Currently all calculations are based on ratio, but for a user it often more
+  convenient to specify a limit in bytes. The new knobs will not store bytes values,
+  instead they will translate the byte value to a corresponding ratio. As the internal
+  values are now part of 10000, the ratio is closer to the specified value. However
+  the value should be more seen as an approximation as it can fluctuate over time.
+
+
+Stefan Roesch (14):
+  mm: add bdi_set_strict_limit() function
+  mm: Add new knob /sys/class/bdi/<bdi>/strict_limit
+  mm: document new /sys/class/bdi/<bdi>/strict_limit knob
+  mm: Use part per 10000 for bdi ratios.
+  mm: add bdi_get_max_bytes() function
+  mm: split off __bdi_set_max_ratio() function
+  mm: add bdi_set_max_bytes() function.
+  mm: Add new knob /sys/class/bdi/<bdi>/max_bytes
+  mm: document new /sys/class/bdi/<bdi>/max_bytes knob
+  mm: add bdi_get_min_bytes() function.
+  mm: split off __bdi_set_min_ratio() function
+  mm: add bdi_set_min_bytes() function
+  mm: add new /sys/class/bdi/<bdi>/min_bytes knob
+  mm: document new /sys/class/bdi/<bdi>/min_bytes knob
+
+ Documentation/ABI/testing/sysfs-class-bdi |  40 +++++++
+ include/linux/backing-dev.h               |   8 ++
+ mm/backing-dev.c                          |  93 +++++++++++++++-
+ mm/page-writeback.c                       | 126 ++++++++++++++++++++--
+ 4 files changed, 253 insertions(+), 14 deletions(-)
+
+
+base-commit: e2302539dd4f1c62d96651c07ddb05aa2461d29c
+-- 
+2.30.2
+

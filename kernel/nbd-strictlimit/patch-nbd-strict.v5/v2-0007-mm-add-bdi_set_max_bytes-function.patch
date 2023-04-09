@@ -1,0 +1,85 @@
+From 56b571f792e0cf3529ac0e6970020345de5fa43d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 5 Oct 2022 16:16:15 -0700
+Subject: [RFC PATCH v2 07/14] mm: add bdi_set_max_bytes() function.
+
+This introduces the bdi_set_max_bytes() function. The max_bytes function
+does not store the max_bytes value. Instead it converts the max_bytes
+value into the corresponding ratio value.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/linux/backing-dev.h |  1 +
+ mm/page-writeback.c         | 37 +++++++++++++++++++++++++++++++++++++
+ 2 files changed, 38 insertions(+)
+
+diff --git a/include/linux/backing-dev.h b/include/linux/backing-dev.h
+index cb0e66564d4d..5eb1ae3410b2 100644
+--- a/include/linux/backing-dev.h
++++ b/include/linux/backing-dev.h
+@@ -108,6 +108,7 @@ static inline unsigned long wb_stat_error(void)
+ unsigned long long bdi_get_max_bytes(struct backing_dev_info *bdi);
+ int bdi_set_min_ratio(struct backing_dev_info *bdi, unsigned int min_ratio);
+ int bdi_set_max_ratio(struct backing_dev_info *bdi, unsigned int max_ratio);
++int bdi_set_max_bytes(struct backing_dev_info *bdi, unsigned long long max_bytes);
+ int bdi_set_strict_limit(struct backing_dev_info *bdi, unsigned int strict_limit);
+ 
+ /*
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 8b8936603783..a6594ebdcbd8 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -650,6 +650,28 @@ void wb_domain_exit(struct wb_domain *dom)
+  */
+ static unsigned int bdi_min_ratio;
+ 
++static int bdi_check_pages_limit(unsigned long pages)
++{
++	unsigned long max_dirty_pages = global_dirtyable_memory();
++
++	if (pages > max_dirty_pages / 2)
++		return -EINVAL;
++
++	return 0;
++}
++
++static unsigned long bdi_ratio_from_pages(unsigned long long pages)
++{
++	unsigned long background_thresh;
++	unsigned long dirty_thresh;
++	unsigned long ratio;
++
++	global_dirty_limits(&background_thresh, &dirty_thresh);
++	ratio = (pages * 100 * BDI_RATIO_SCALE) / dirty_thresh;
++
++	return ratio;
++}
++
+ static unsigned long long bdi_get_bytes(unsigned int ratio)
+ {
+ 	unsigned long background_thresh;
+@@ -723,6 +745,21 @@ unsigned long long bdi_get_max_bytes(struct backing_dev_info *bdi)
+ }
+ EXPORT_SYMBOL_GPL(bdi_get_max_bytes);
+ 
++int bdi_set_max_bytes(struct backing_dev_info *bdi, unsigned long long max_bytes)
++{
++	int ret;
++	unsigned long pages = max_bytes >> PAGE_SHIFT;
++	unsigned long max_ratio;
++
++	ret = bdi_check_pages_limit(pages);
++	if (ret)
++		return ret;
++
++	max_ratio = bdi_ratio_from_pages(pages);
++	return __bdi_set_max_ratio(bdi, max_ratio);
++}
++EXPORT_SYMBOL_GPL(bdi_set_max_bytes);
++
+ int bdi_set_strict_limit(struct backing_dev_info *bdi, unsigned int strict_limit)
+ {
+ 	if (strict_limit > 1)
+-- 
+2.30.2
+

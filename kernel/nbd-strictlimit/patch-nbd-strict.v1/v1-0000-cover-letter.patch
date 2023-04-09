@@ -1,0 +1,34 @@
+From 0b7bc7ab6a4d4ec98aac10b9cc3cc2791f72c549 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 6 Oct 2022 13:42:00 -0700
+Subject: [RFC PATCH v1 00/14] *** SUBJECT HERE ***
+
+*** BLURB HERE ***
+
+Stefan Roesch (14):
+  mm: add bdi_set_strict_limit() function
+  mm: Add new knob /sys/class/bdi/<bdi>/strict_limit
+  mm: document new /sys/class/bdi/<bdi>/strict_limit knob
+  mm: Use part per 10000 for bdi ratios.
+  mm: add bdi_get_max_bytes() function
+  mm: split off __bdi_set_max_ratio() function
+  mm: add bdi_set_max_bytes() function.
+  mm: Add new knob /sys/class/bdi/<bdi>/max_bytes
+  mm: document new /sys/class/bdi/<bdi>/max_bytes knob
+  mm: add bdi_get_min_bytes() function.
+  mm: split off __bdi_set_min_ratio() function
+  mm: add bdi_set_min_bytes() function
+  mm: add new /sys/class/bdi/<bdi>/min_bytes knob
+  mm: document new /sys/class/bdi/<bdi>/min_bytes knob
+
+ Documentation/ABI/testing/sysfs-class-bdi |  40 +++++++
+ include/linux/backing-dev.h               |   8 ++
+ mm/backing-dev.c                          |  93 +++++++++++++++-
+ mm/page-writeback.c                       | 126 ++++++++++++++++++++--
+ 4 files changed, 253 insertions(+), 14 deletions(-)
+
+
+base-commit: 833477fce7a14d43ae4c07f8ddc32fa5119471a2
+-- 
+2.30.2
+

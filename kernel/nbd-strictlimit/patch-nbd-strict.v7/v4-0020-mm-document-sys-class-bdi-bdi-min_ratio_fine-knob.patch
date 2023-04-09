@@ -1,0 +1,42 @@
+From b5bcd6fbd825374560a0edebf684a7560c5684e7 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Thu, 17 Nov 2022 12:10:10 -0800
+Subject: [RFC PATCH v4 20/20] mm: document /sys/class/bdi/<bdi>/min_ratio_fine
+ knob
+
+This documents the new /sys/class/bdi/<bdi>/max_ratio_fine knob.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ Documentation/ABI/testing/sysfs-class-bdi | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/Documentation/ABI/testing/sysfs-class-bdi b/Documentation/ABI/testing/sysfs-class-bdi
+index 34d2e5489c74..b4ed0db680cf 100644
+--- a/Documentation/ABI/testing/sysfs-class-bdi
++++ b/Documentation/ABI/testing/sysfs-class-bdi
+@@ -44,6 +44,21 @@ Description:
+ 
+ 	(read-write)
+ 
++What:		/sys/class/bdi/<bdi>/min_ratio_fine
++Date:		November 2022
++Contact:	Stefan Roesch <shr@devkernel.io>
++Description:
++	Under normal circumstances each device is given a part of the
++	total write-back cache that relates to its current average
++	writeout speed in relation to the other devices.
++
++	The 'min_ratio_fine' parameter allows assigning a minimum reserve
++	of the write-back cache to a particular device. The value is
++    expressed as part of 1 million. For example, this is useful for
++    providing a minimum QoS.
++
++	(read-write)
++
+ What:		/sys/class/bdi/<bdi>/max_ratio
+ Date:		January 2008
+ Contact:	Peter Zijlstra <a.p.zijlstra@chello.nl>
+-- 
+2.30.2
+
