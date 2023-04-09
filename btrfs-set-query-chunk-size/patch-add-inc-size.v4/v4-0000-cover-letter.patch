@@ -1,0 +1,68 @@
+From 31a94237c0cfd9f5fcd94f839228aa74d91c0728 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 29 Oct 2021 11:35:23 -0700
+Subject: [PATCH v4 0/4] btrfs: sysfs: set / query btrfs chunk size
+
+Motivation:
+The btrfs allocator is currently not ideal for all workloads. It tends
+to suffer from overallocating data block groups and underallocating
+metadata block groups. This results in filesystems becoming read-only
+even though there is plenty of "free" space.
+
+This is naturally confusing and distressing to users.
+
+Patches:
+1) Store the stripe and chunk size in the btrfs_space_info structure
+2) Add a sysfs entry to expose the above information
+3) Add a sysfs entry to force a space allocation
+4) Increase the default size of the metadata chunk allocation to 5GB
+   for volumes greater than 50GB.
+
+Testing:
+  A new test is being added to the xfstest suite. For reference the
+  corresponding patch has the title:
+    [PATCH] btrfs: Test chunk allocation with different sizes
+
+  In addition also manual testing has been performed.
+    - Run xfstests with the changes and the new test. It does not
+      show new diffs.
+    - Test with storage devices 10G, 20G, 30G, 50G, 60G
+      - Default allocation
+      - Increase of chunk size
+      - If the stripe size is > the free space, it allocates
+        free space - 1MB. The 1MB is left as free space.
+      - If the device has a storage size > 50G, it uses a 5GB
+        chunk size for new allocations.
+
+Stefan Roesch (4):
+  btrfs: store chunk size in space-info struct.
+  btrfs: expose chunk size in sysfs.
+  btrfs: add force_chunk_alloc sysfs entry to force allocation
+  btrfs: increase metadata alloc size to 5GB for volumes > 50GB
+
+ fs/btrfs/space-info.c |  51 +++++++++++++++
+ fs/btrfs/space-info.h |   3 +
+ fs/btrfs/sysfs.c      | 145 ++++++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/volumes.c    |  28 +++-----
+ 4 files changed, 208 insertions(+), 19 deletions(-)
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+V4: - Patch email contained duplicate entries.
+
+V3: - Rename sysfs entry from stripe_size to chunk_size
+    - Remove max_chunk_size field in data structure btrfs_space_info
+    - Rename max_stripe_size field to default_chunk_size in data
+      structure btrfs_space_info
+    - Remove max_chunk_size logic
+    - Use stripe_size = chunk_size
+
+V2:
+   - Split the patch in 4 patches
+   - Added checks for zone volumes in sysfs.c
+   - Replaced the BUG() with ASSERT()
+   - Changed if with fallthrough
+   - Removed comments in space-info.h
+-- 
+2.30.2
+

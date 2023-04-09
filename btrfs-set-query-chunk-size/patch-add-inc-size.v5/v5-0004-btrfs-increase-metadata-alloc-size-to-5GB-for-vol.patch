@@ -1,0 +1,30 @@
+From cc6a61634c71c75dbb743746ffd74f87ec8a2cbb Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 27 Oct 2021 11:10:08 -0700
+Subject: [PATCH v5 4/4] btrfs: increase metadata alloc size to 5GB for volumes
+ > 50GB
+
+This increases the metadata default allocation size from 1GB to 5GB for
+volumes with a size greater than 50GB.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/space-info.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/space-info.c b/fs/btrfs/space-info.c
+index 3a31aea701a8..0d0accbe3bfb 100644
+--- a/fs/btrfs/space-info.c
++++ b/fs/btrfs/space-info.c
+@@ -195,7 +195,7 @@ static u64 compute_chunk_size_regular(struct btrfs_fs_info *info, u64 flags)
+ 
+ 	/* Handle BTRFS_BLOCK_GROUP_METADATA */
+ 	if (info->fs_devices->total_rw_bytes > 50ULL * SZ_1G)
+-		return SZ_1G;
++		return 5ULL * SZ_1G;
+ 
+ 	return SZ_256M;
+ }
+-- 
+2.30.2
+

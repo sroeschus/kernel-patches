@@ -1,0 +1,143 @@
+From 0e64b66e57040d7f8c1b34e89222c495e79a54f0 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 27 Oct 2021 10:58:44 -0700
+Subject: [PATCH v2 2/4] btrfs: expose stripe and chunk size in sysfs.
+
+This adds a new sysfs entry in /sys/fs/btrfs/<uuid>/allocation/<block
+type>/stripe_size. This allows to query the stripe size and also set the
+stripe size.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/sysfs.c | 80 ++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 80 insertions(+)
+
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 25a6f587852b..bdfcd3d42bc4 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -21,6 +21,7 @@
+ #include "space-info.h"
+ #include "block-group.h"
+ #include "qgroup.h"
++#include "misc.h"
+ 
+ /*
+  * Structure name                       Path
+@@ -92,6 +93,7 @@ static struct btrfs_feature_attr btrfs_attr_features_##_name = {	     \
+ 
+ static inline struct btrfs_fs_info *to_fs_info(struct kobject *kobj);
+ static inline struct btrfs_fs_devices *to_fs_devs(struct kobject *kobj);
++static inline struct kobject *get_btrfs_kobj(struct kobject *kobj);
+ 
+ static struct btrfs_feature_attr *to_btrfs_feature_attr(struct kobj_attribute *a)
+ {
+@@ -709,6 +711,67 @@ static ssize_t btrfs_space_info_show_##field(struct kobject *kobj,	\
+ }									\
+ BTRFS_ATTR(space_info, field, btrfs_space_info_show_##field)
+ 
++/*
++ * Return space info stripe size.
++ */
++static ssize_t btrfs_stripe_size_show(struct kobject *kobj,
++				      struct kobj_attribute *a, char *buf)
++{
++	struct btrfs_space_info *sinfo = to_space_info(kobj);
++
++	return btrfs_show_u64(&sinfo->max_stripe_size, &sinfo->lock, buf);
++}
++
++/*
++ * Store new user supplied stripe size in space info.
++ *
++ * Note: If the new stripe size value is larger than 10% of free space it is
++ *       reduced to match that limit.
++ */
++static ssize_t btrfs_stripe_size_store(struct kobject *kobj,
++				       struct kobj_attribute *a,
++				       const char *buf, size_t len)
++{
++	struct btrfs_space_info *space_info = to_space_info(kobj);
++	struct btrfs_fs_info *fs_info = to_fs_info(get_btrfs_kobj(kobj));
++	u64 val;
++	int ret;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++
++	if (!fs_info) {
++		pr_err("couldn't get fs_info\n");
++		return -EPERM;
++	}
++
++	if (sb_rdonly(fs_info->sb))
++		return -EROFS;
++
++	if (!fs_info->fs_devices)
++		return -EINVAL;
++
++	if (btrfs_is_zoned(fs_info))
++		return -EINVAL;
++
++	if (!space_info) {
++		btrfs_err(fs_info, "couldn't get space_info\n");
++		return -EPERM;
++	}
++
++	ret = kstrtoull(buf, 10, &val);
++	if (ret)
++		return ret;
++
++	/*
++	 * Limit stripe size to 10% of available space.
++	 */
++	val = min(div_factor(fs_info->fs_devices->total_rw_bytes, 1), val);
++	btrfs_update_space_info_max_alloc_sizes(space_info, space_info->flags, val);
++
++	return val;
++}
++
+ SPACE_INFO_ATTR(flags);
+ SPACE_INFO_ATTR(total_bytes);
+ SPACE_INFO_ATTR(bytes_used);
+@@ -719,6 +782,8 @@ SPACE_INFO_ATTR(bytes_readonly);
+ SPACE_INFO_ATTR(bytes_zone_unusable);
+ SPACE_INFO_ATTR(disk_used);
+ SPACE_INFO_ATTR(disk_total);
++BTRFS_ATTR_RW(space_info, stripe_size, btrfs_stripe_size_show,
++	      btrfs_stripe_size_store);
+ 
+ /*
+  * Allocation information about block group types.
+@@ -736,6 +801,7 @@ static struct attribute *space_info_attrs[] = {
+ 	BTRFS_ATTR_PTR(space_info, bytes_zone_unusable),
+ 	BTRFS_ATTR_PTR(space_info, disk_used),
+ 	BTRFS_ATTR_PTR(space_info, disk_total),
++	BTRFS_ATTR_PTR(space_info, stripe_size),
+ 	NULL,
+ };
+ ATTRIBUTE_GROUPS(space_info);
+@@ -1103,6 +1169,20 @@ static inline struct btrfs_fs_info *to_fs_info(struct kobject *kobj)
+ 	return to_fs_devs(kobj)->fs_info;
+ }
+ 
++/*
++ * Get btrfs sysfs kobject.
++ */
++static inline struct kobject *get_btrfs_kobj(struct kobject *kobj)
++{
++	while (kobj) {
++		if (kobj->ktype == &btrfs_ktype)
++			return kobj;
++		kobj = kobj->parent;
++	}
++
++	return NULL;
++}
++
+ #define NUM_FEATURE_BITS 64
+ #define BTRFS_FEATURE_NAME_MAX 13
+ static char btrfs_unknown_feature_names[FEAT_MAX][NUM_FEATURE_BITS][BTRFS_FEATURE_NAME_MAX];
+-- 
+2.30.2
+
