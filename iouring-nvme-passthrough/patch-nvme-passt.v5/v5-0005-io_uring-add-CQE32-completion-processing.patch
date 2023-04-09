@@ -1,0 +1,110 @@
+From c9aa0fdf7bcbcb6d99d412ad139f4ea8fa19420e Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Apr 2022 12:27:37 -0700
+Subject: [PATCH v5 05/12] io_uring: add CQE32 completion processing
+
+This adds the completion processing for the large CQE's and makes sure
+that the extra1 and extra2 fields are passed through.
+
+Co-developed-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 55 +++++++++++++++++++++++++++++++++++++++++++--------
+ 1 file changed, 47 insertions(+), 8 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 4d1b751f6cc9..6519d76748ca 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -2226,18 +2226,15 @@ static noinline bool io_fill_cqe_aux(struct io_ring_ctx *ctx, u64 user_data,
+ 	return __io_fill_cqe(ctx, user_data, res, cflags);
+ }
+ 
+-static void __io_req_complete_post(struct io_kiocb *req, s32 res,
+-				   u32 cflags)
++static void __io_req_complete_put(struct io_kiocb *req)
+ {
+-	struct io_ring_ctx *ctx = req->ctx;
+-
+-	if (!(req->flags & REQ_F_CQE_SKIP))
+-		__io_fill_cqe_req(req, res, cflags);
+ 	/*
+ 	 * If we're the last reference to this request, add to our locked
+ 	 * free_list cache.
+ 	 */
+ 	if (req_ref_put_and_test(req)) {
++		struct io_ring_ctx *ctx = req->ctx;
++
+ 		if (req->flags & (REQ_F_LINK | REQ_F_HARDLINK)) {
+ 			if (req->flags & IO_DISARM_MASK)
+ 				io_disarm_next(req);
+@@ -2260,8 +2257,23 @@ static void __io_req_complete_post(struct io_kiocb *req, s32 res,
+ 	}
+ }
+ 
+-static void io_req_complete_post(struct io_kiocb *req, s32 res,
+-				 u32 cflags)
++static void __io_req_complete_post(struct io_kiocb *req, s32 res,
++				   u32 cflags)
++{
++	if (!(req->flags & REQ_F_CQE_SKIP))
++		__io_fill_cqe_req(req, res, cflags);
++	__io_req_complete_put(req);
++}
++
++static void __io_req_complete_post32(struct io_kiocb *req, s32 res,
++				   u32 cflags, u64 extra1, u64 extra2)
++{
++	if (!(req->flags & REQ_F_CQE_SKIP))
++		__io_fill_cqe32_req(req, res, cflags, extra1, extra2);
++	__io_req_complete_put(req);
++}
++
++static void io_req_complete_post(struct io_kiocb *req, s32 res, u32 cflags)
+ {
+ 	struct io_ring_ctx *ctx = req->ctx;
+ 
+@@ -2272,6 +2284,18 @@ static void io_req_complete_post(struct io_kiocb *req, s32 res,
+ 	io_cqring_ev_posted(ctx);
+ }
+ 
++static void io_req_complete_post32(struct io_kiocb *req, s32 res,
++				   u32 cflags, u64 extra1, u64 extra2)
++{
++	struct io_ring_ctx *ctx = req->ctx;
++
++	spin_lock(&ctx->completion_lock);
++	__io_req_complete_post32(req, res, cflags, extra1, extra2);
++	io_commit_cqring(ctx);
++	spin_unlock(&ctx->completion_lock);
++	io_cqring_ev_posted(ctx);
++}
++
+ static inline void io_req_complete_state(struct io_kiocb *req, s32 res,
+ 					 u32 cflags)
+ {
+@@ -2289,6 +2313,21 @@ static inline void __io_req_complete(struct io_kiocb *req, unsigned issue_flags,
+ 		io_req_complete_post(req, res, cflags);
+ }
+ 
++static inline void __io_req_complete32(struct io_kiocb *req,
++				       unsigned int issue_flags, s32 res,
++				       u32 cflags, u64 extra1, u64 extra2)
++{
++	if (issue_flags & IO_URING_F_COMPLETE_DEFER) {
++		req->cqe.res = res;
++		req->cqe.flags = cflags;
++		req->extra1 = extra1;
++		req->extra2 = extra2;
++		req->flags |= REQ_F_COMPLETE_INLINE;
++	} else {
++		io_req_complete_post32(req, res, cflags, extra1, extra2);
++	}
++}
++
+ static inline void io_req_complete(struct io_kiocb *req, s32 res)
+ {
+ 	__io_req_complete(req, 0, res, 0);
+-- 
+2.30.2
+

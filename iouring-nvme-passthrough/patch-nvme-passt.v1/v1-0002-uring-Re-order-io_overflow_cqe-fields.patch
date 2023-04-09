@@ -1,0 +1,31 @@
+From b3a5786b32beecf2ed25c85be7132d96bddc11a1 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 11 Apr 2022 16:38:48 -0700
+Subject: [PATCH v1 2/4] uring: Re-order io_overflow_cqe fields
+
+The cqe field can have a different size depending if its a large
+CQE or not. To be able to allocate different sizes, the two fields
+in the structure are re-ordered.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index d7d31114e051..cbfd7ed1eeb3 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -220,8 +220,8 @@ struct io_mapped_ubuf {
+ struct io_ring_ctx;
+ 
+ struct io_overflow_cqe {
+-	struct io_uring_cqe cqe;
+ 	struct list_head list;
++	struct io_uring_cqe cqe;
+ };
+ 
+ struct io_fixed_file {
+-- 
+2.30.2
+

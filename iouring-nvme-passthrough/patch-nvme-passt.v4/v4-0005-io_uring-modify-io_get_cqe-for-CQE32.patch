@@ -1,0 +1,40 @@
+From 8b0c2f88fba8ff23e9e6f28185a51789003ce376 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 12 Apr 2022 13:59:39 -0700
+Subject: [PATCH v4 5/9] io_uring: modify io_get_cqe for CQE32
+
+Modify accesses to the CQE array to take large CQE's into account. The
+index needs to be shifted by one for large CQE's.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index e2a07cef649c..4219d31a1c57 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -1832,6 +1832,10 @@ static inline struct io_uring_cqe *io_get_cqe(struct io_ring_ctx *ctx)
+ {
+ 	struct io_rings *rings = ctx->rings;
+ 	unsigned tail, mask = ctx->cq_entries - 1;
++	int shift = 0;
++
++	if (ctx->flags & IORING_SETUP_CQE32)
++		shift = 1;
+ 
+ 	/*
+ 	 * writes to the cq entry need to come after reading head; the
+@@ -1842,7 +1846,7 @@ static inline struct io_uring_cqe *io_get_cqe(struct io_ring_ctx *ctx)
+ 		return NULL;
+ 
+ 	tail = ctx->cached_cq_tail++;
+-	return &rings->cqes[tail & mask];
++	return &rings->cqes[(tail & mask) << shift];
+ }
+ 
+ static void io_eventfd_signal(struct io_ring_ctx *ctx)
+-- 
+2.30.2
+

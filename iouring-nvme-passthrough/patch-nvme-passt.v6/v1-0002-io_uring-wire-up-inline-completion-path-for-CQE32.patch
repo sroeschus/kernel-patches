@@ -1,0 +1,39 @@
+From dbe36755c497b2f1f2ea6a60d2b1a5732ffcc637 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Apr 2022 13:44:13 -0700
+Subject: [PATCH v1 02/11] io_uring: wire up inline completion path for CQE32
+
+Rather than always use the slower locked path, wire up use of the
+deferred completion path that normal CQEs can take. This reuses the
+hash list node for the storage we need to hold the two 64-bit values
+that must be passed back.
+
+Co-developed-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ fs/io_uring.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 4c32cf987ef3..bf2b02518332 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -964,7 +964,13 @@ struct io_kiocb {
+ 	atomic_t			poll_refs;
+ 	struct io_task_work		io_task_work;
+ 	/* for polled requests, i.e. IORING_OP_POLL_ADD and async armed poll */
+-	struct hlist_node		hash_node;
++	union {
++		struct hlist_node	hash_node;
++		struct {
++			u64		extra1;
++			u64		extra2;
++		};
++	};
+ 	/* internal polling, see IORING_FEAT_FAST_POLL */
+ 	struct async_poll		*apoll;
+ 	/* opcode allocated if it needs to store data for async defer */
+-- 
+2.30.2
+

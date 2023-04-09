@@ -1,0 +1,84 @@
+From 1f54b1efa05097fb7581e0a133f7ce7b5b335dab Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 12 Apr 2022 11:45:20 -0700
+Subject: [PATCH v5 12/12] io_uring: support CQE32 for nop operation
+
+This adds support for filling the extra1 and extra2 fields for large
+CQE's.
+
+Co-developed-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 28 ++++++++++++++++++++++++++--
+ 1 file changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 48b91577ca21..6da9c783931e 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -734,6 +734,12 @@ struct io_msg {
+ 	u32 len;
+ };
+ 
++struct io_nop {
++	struct file			*file;
++	u64				extra1;
++	u64				extra2;
++};
++
+ struct io_async_connect {
+ 	struct sockaddr_storage		address;
+ };
+@@ -926,6 +932,7 @@ struct io_kiocb {
+ 		struct io_hardlink	hardlink;
+ 		struct io_msg		msg;
+ 		struct io_xattr		xattr;
++		struct io_nop		nop;
+ 	};
+ 
+ 	u8				opcode;
+@@ -4875,6 +4882,19 @@ static int io_splice(struct io_kiocb *req, unsigned int issue_flags)
+ 	return 0;
+ }
+ 
++static int io_nop_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
++{
++	/*
++	 * If the ring is setup with CQE32, relay back addr/addr
++	 */
++	if (req->ctx->flags & IORING_SETUP_CQE32) {
++		req->nop.extra1 = READ_ONCE(sqe->addr);
++		req->nop.extra2 = READ_ONCE(sqe->addr2);
++	}
++
++	return 0;
++}
++
+ /*
+  * IORING_OP_NOP just posts a completion event, nothing else.
+  */
+@@ -4885,7 +4905,11 @@ static int io_nop(struct io_kiocb *req, unsigned int issue_flags)
+ 	if (unlikely(ctx->flags & IORING_SETUP_IOPOLL))
+ 		return -EINVAL;
+ 
+-	__io_req_complete(req, issue_flags, 0, 0);
++	if (!(ctx->flags & IORING_SETUP_CQE32))
++		__io_req_complete(req, issue_flags, 0, 0);
++	else
++		__io_req_complete32(req, issue_flags, 0, 0, req->nop.extra1,
++					req->nop.extra2);
+ 	return 0;
+ }
+ 
+@@ -7299,7 +7323,7 @@ static int io_req_prep(struct io_kiocb *req, const struct io_uring_sqe *sqe)
+ {
+ 	switch (req->opcode) {
+ 	case IORING_OP_NOP:
+-		return 0;
++		return io_nop_prep(req, sqe);
+ 	case IORING_OP_READV:
+ 	case IORING_OP_READ_FIXED:
+ 	case IORING_OP_READ:
+-- 
+2.30.2
+

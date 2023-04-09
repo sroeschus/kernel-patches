@@ -1,0 +1,55 @@
+From 32722a4b6d4d9784fd035058d5a88f78ef8b9b00 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 12 Apr 2022 09:54:49 -0700
+Subject: [PATCH v2 0/3] Add large CQE support for io-uring
+
+This adds the large CQE support for io-uring. Large CQE's are 16 bytes longer.
+To support the longer CQE's the allocation part is changed and when the CQE is
+accessed.
+
+The allocation of the large CQE's is twice as big, so the allocation size is
+doubled.
+
+All accesses to the large CQE's need to be shifted by 1 to take the bigger size
+of each CQE into account. The exisiting index manipulation does not need to be
+changed and can stay the same.
+
+The code for overflows needs to be adapted accordingly: the allocation needs to
+take large CQE's into account. This means that the order of the fields in the io
+overflow structure needs to be changed and the allocation needs to be enlarged
+for big CQE's.
+In addition the two new fields need to be copied for large CQE's.
+
+Testing:
+
+The exisiting tests have been run with the following configurations and they all
+pass:
+
+- Default config
+- Large SQE
+- Large CQE
+- Large SQE and large CQE.
+
+Note:
+To use this patch also the corresponding changes to the client library
+liburing are required. A different patch series is sent out for this.
+
+
+Changes:
+  V2: - Fold patch 2 and patch 3
+      - Add uses size of struct instead of 16
+
+
+Stefan Roesch (3):
+  uring: Modify io_get_cqe for large CQE's
+  uring: Allocate correct size in overflow structure for large CQE's
+  uring: initialize new fields for large CQE's in overflow struct
+
+ fs/io_uring.c | 39 ++++++++++++++++++++++-----------------
+ 1 file changed, 22 insertions(+), 17 deletions(-)
+
+
+base-commit: b83d6cd2ee6466fc94f009c375fb43e477e4f68c
+-- 
+2.30.2
+

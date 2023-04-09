@@ -1,0 +1,60 @@
+From b012d82ac8a7d89d528393377364df5495c6cae9 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 11 Apr 2022 16:36:15 -0700
+Subject: [PATCH v2 1/3] uring: Modify io_get_cqe for large CQE's
+
+Large CQE's have double the size per item. When the CQE's are
+accessed this needs to be considered.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 12 +++++-------
+ 1 file changed, 5 insertions(+), 7 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 80e2187427cf..d7d31114e051 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -1839,6 +1839,10 @@ static inline struct io_uring_cqe *io_get_cqe(struct io_ring_ctx *ctx)
+ {
+ 	struct io_rings *rings = ctx->rings;
+ 	unsigned tail, mask = ctx->cq_entries - 1;
++	int shift = 0;
++
++	if (ctx->flags & IORING_SETUP_CQE32)
++		shift = 1;
+ 
+ 	/*
+ 	 * writes to the cq entry need to come after reading head; the
+@@ -1849,7 +1853,7 @@ static inline struct io_uring_cqe *io_get_cqe(struct io_ring_ctx *ctx)
+ 		return NULL;
+ 
+ 	tail = ctx->cached_cq_tail++;
+-	return &rings->cqes[tail & mask];
++	return &rings->cqes[(tail & mask) << shift];
+ }
+ 
+ static void io_eventfd_signal(struct io_ring_ctx *ctx)
+@@ -1924,9 +1928,6 @@ static bool __io_cqring_overflow_flush(struct io_ring_ctx *ctx, bool force)
+ 	if (!force && __io_cqring_events(ctx) == ctx->cq_entries)
+ 		return false;
+ 
+-	if (ctx->flags & IORING_SETUP_CQE32)
+-		return false;
+-
+ 	posted = false;
+ 	spin_lock(&ctx->completion_lock);
+ 	while (!list_empty(&ctx->cq_overflow_list)) {
+@@ -2120,9 +2121,6 @@ static void __io_fill_cqe32_req(struct io_kiocb *req, s32 res, u32 cflags,
+ 	 */
+ 	cqe = io_get_cqe(ctx);
+ 	if (likely(cqe)) {
+-		/* double index for 32-byte CQEs, twice as big */
+-		ctx->cached_cq_tail++;
+-
+ 		WRITE_ONCE(cqe->user_data, req->user_data);
+ 		WRITE_ONCE(cqe->res, res);
+ 		WRITE_ONCE(cqe->flags, cflags);
+-- 
+2.30.2
+

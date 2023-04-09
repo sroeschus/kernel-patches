@@ -1,0 +1,89 @@
+From 08cc09c7243fb3b5522d215ff21202c4ac1d15bd Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 26 Apr 2022 11:18:15 -0700
+Subject: [PATCH v4 00/12] add large CQE support for io-uring
+
+This adds the large CQE support for io-uring. Large CQE's are 16 bytes longer.
+To support the longer CQE's the allocation part is changed and when the CQE is
+accessed.
+
+The allocation of the large CQE's is twice as big, so the allocation size is
+doubled. The ring size calculation needs to take this into account.
+
+All accesses to the large CQE's need to be shifted by 1 to take the bigger size
+of each CQE into account. The existing index manipulation does not need to be
+changed and can stay the same.
+
+The setup and the completion processing needs to take the new fields into
+account and initialize them. For the completion processing these fields need
+to be passed through.
+
+The flush completion processing needs to fill the additional CQE32 fields.
+
+The code for overflows needs to be adapted accordingly: the allocation needs to
+take large CQE's into account. This means that the order of the fields in the io
+overflow structure needs to be changed and the allocation needs to be enlarged
+for big CQE's.
+In addition the two new fields need to be copied for large CQE's.
+
+The new fields are added to the tracing statements, so the extra1 and extra2
+fields are exposed in tracing. The new fields are also exposed in the /proc
+filesystem entry.
+
+For testing purposes the extra1 and extra2 fields are used by the nop operation.
+
+
+Testing:
+
+The exisiting tests have been run with the following configurations and they all
+pass:
+
+- Default config
+- Large SQE
+- Large CQE
+- Large SQE and large CQE.
+
+In addition a new test has been added to liburing to verify that extra1 and extra2
+are set as expected for the nop operation.
+
+Note:
+To use this patch also the corresponding changes to the client library
+liburing are required. A different patch series is sent out for this.
+
+
+Changes:
+  V2: - added support for CQE32 in the /proc filesystem entry output function
+      - the definition of the io_uring_cqe_extra field has been changed
+        to avoid warning with the /proc changes.
+  V3: - use __64 for big cqe in io_uring_cqe data structure
+      - use io_req_complete_state helper in __io_req_complete32
+      - support cached cqe's
+      - use bool for cqe32 check in io_cqring_event_overflow
+      - use bool for cqe32 check in __io_uring_show_fdinfo
+  V4: - Rewording of 2 commit messages
+
+
+Stefan Roesch (12):
+  io_uring: support CQE32 in io_uring_cqe
+  io_uring: store add. return values for CQE32
+  io_uring: change ring size calculation for CQE32
+  io_uring: add CQE32 setup processing
+  io_uring: add CQE32 completion processing
+  io_uring: modify io_get_cqe for CQE32
+  io_uring: flush completions for CQE32
+  io_uring: overflow processing for CQE32
+  io_uring: add tracing for additional CQE32 fields
+  io_uring: support CQE32 in /proc info
+  io_uring: enable CQE32
+  io_uring: support CQE32 for nop operation
+
+ fs/io_uring.c                   | 234 ++++++++++++++++++++++++++++----
+ include/trace/events/io_uring.h |  18 ++-
+ include/uapi/linux/io_uring.h   |   7 +
+ 3 files changed, 225 insertions(+), 34 deletions(-)
+
+
+base-commit: fd1cf8f1947eb7b009eb79807ec8af0e920fc57b
+-- 
+2.30.2
+

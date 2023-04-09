@@ -1,0 +1,115 @@
+From f530f7441ed04c1794e025075647370e71354fcf Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 11 Apr 2022 16:38:48 -0700
+Subject: [PATCH v5 08/12] io_uring: overflow processing for CQE32
+
+This adds the overflow processing for large CQE's.
+
+This adds two parameters to the io_cqring_event_overflow function and
+uses these fields to initialize the large CQE fields.
+
+Allocate enough space for large CQE's in the overflow structue. If no
+large CQE's are used, the size of the allocation is unchanged.
+
+The cqe field can have a different size depending if its a large
+CQE or not. To be able to allocate different sizes, the two fields
+in the structure are re-ordered.
+
+Co-developed-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 26 +++++++++++++++++++-------
+ 1 file changed, 19 insertions(+), 7 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 351d331343fc..26b211fc17bc 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -220,8 +220,8 @@ struct io_mapped_ubuf {
+ struct io_ring_ctx;
+ 
+ struct io_overflow_cqe {
+-	struct io_uring_cqe cqe;
+ 	struct list_head list;
++	struct io_uring_cqe cqe;
+ };
+ 
+ struct io_fixed_file {
+@@ -1989,13 +1989,17 @@ static bool __io_cqring_overflow_flush(struct io_ring_ctx *ctx, bool force)
+ 	while (!list_empty(&ctx->cq_overflow_list)) {
+ 		struct io_uring_cqe *cqe = io_get_cqe(ctx);
+ 		struct io_overflow_cqe *ocqe;
++		size_t cqe_size = sizeof(struct io_uring_cqe);
++
++		if (ctx->flags & IORING_SETUP_CQE32)
++			cqe_size <<= 1;
+ 
+ 		if (!cqe && !force)
+ 			break;
+ 		ocqe = list_first_entry(&ctx->cq_overflow_list,
+ 					struct io_overflow_cqe, list);
+ 		if (cqe)
+-			memcpy(cqe, &ocqe->cqe, sizeof(*cqe));
++			memcpy(cqe, &ocqe->cqe, cqe_size);
+ 		else
+ 			io_account_cq_overflow(ctx);
+ 
+@@ -2084,11 +2088,15 @@ static __cold void io_uring_drop_tctx_refs(struct task_struct *task)
+ }
+ 
+ static bool io_cqring_event_overflow(struct io_ring_ctx *ctx, u64 user_data,
+-				     s32 res, u32 cflags)
++				     s32 res, u32 cflags, u64 extra1, u64 extra2)
+ {
+ 	struct io_overflow_cqe *ocqe;
++	size_t ocq_size = sizeof(struct io_overflow_cqe);
+ 
+-	ocqe = kmalloc(sizeof(*ocqe), GFP_ATOMIC | __GFP_ACCOUNT);
++	if (ctx->flags & IORING_SETUP_CQE32)
++		ocq_size += sizeof(struct io_uring_cqe);
++
++	ocqe = kmalloc(ocq_size, GFP_ATOMIC | __GFP_ACCOUNT);
+ 	if (!ocqe) {
+ 		/*
+ 		 * If we're in ring overflow flush mode, or in task cancel mode,
+@@ -2107,6 +2115,10 @@ static bool io_cqring_event_overflow(struct io_ring_ctx *ctx, u64 user_data,
+ 	ocqe->cqe.user_data = user_data;
+ 	ocqe->cqe.res = res;
+ 	ocqe->cqe.flags = cflags;
++	if (ctx->flags & IORING_SETUP_CQE32) {
++		ocqe->cqe.b[0].extra1 = extra1;
++		ocqe->cqe.b[0].extra2 = extra2;
++	}
+ 	list_add_tail(&ocqe->list, &ctx->cq_overflow_list);
+ 	return true;
+ }
+@@ -2128,7 +2140,7 @@ static inline bool __io_fill_cqe(struct io_ring_ctx *ctx, u64 user_data,
+ 		WRITE_ONCE(cqe->flags, cflags);
+ 		return true;
+ 	}
+-	return io_cqring_event_overflow(ctx, user_data, res, cflags);
++	return io_cqring_event_overflow(ctx, user_data, res, cflags, 0, 0);
+ }
+ 
+ static inline bool __io_fill_cqe_req_filled(struct io_ring_ctx *ctx,
+@@ -2150,7 +2162,7 @@ static inline bool __io_fill_cqe_req_filled(struct io_ring_ctx *ctx,
+ 		return true;
+ 	}
+ 	return io_cqring_event_overflow(ctx, req->cqe.user_data,
+-					req->cqe.res, req->cqe.flags);
++					req->cqe.res, req->cqe.flags, 0, 0);
+ }
+ 
+ static inline bool __io_fill_cqe32_req_filled(struct io_ring_ctx *ctx,
+@@ -2214,7 +2226,7 @@ static void __io_fill_cqe32_req(struct io_kiocb *req, s32 res, u32 cflags,
+ 		return;
+ 	}
+ 
+-	io_cqring_event_overflow(ctx, req->cqe.user_data, res, cflags);
++	io_cqring_event_overflow(ctx, req->cqe.user_data, res, cflags, extra1, extra2);
+ }
+ 
+ static noinline void io_fill_cqe_req(struct io_kiocb *req, s32 res, u32 cflags)
+-- 
+2.30.2
+

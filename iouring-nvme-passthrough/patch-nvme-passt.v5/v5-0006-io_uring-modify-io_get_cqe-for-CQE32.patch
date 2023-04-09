@@ -1,0 +1,49 @@
+From a5da390ab8f8f2e59af9a7dbdd75a37e6e428ed5 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 12 Apr 2022 13:59:39 -0700
+Subject: [PATCH v5 06/12] io_uring: modify io_get_cqe for CQE32
+
+Modify accesses to the CQE array to take large CQE's into account. The
+index needs to be shifted by one for large CQE's.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 9 +++++++--
+ 1 file changed, 7 insertions(+), 2 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 6519d76748ca..9f01309494b2 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -1882,8 +1882,12 @@ static noinline struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx)
+ {
+ 	struct io_rings *rings = ctx->rings;
+ 	unsigned int off = ctx->cached_cq_tail & (ctx->cq_entries - 1);
++	unsigned int shift = 0;
+ 	unsigned int free, queued, len;
+ 
++	if (ctx->flags & IORING_SETUP_CQE32)
++		shift = 1;
++
+ 	/* userspace may cheat modifying the tail, be safe and do min */
+ 	queued = min(__io_cqring_events(ctx), ctx->cq_entries);
+ 	free = ctx->cq_entries - queued;
+@@ -1895,12 +1899,13 @@ static noinline struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx)
+ 	ctx->cached_cq_tail++;
+ 	ctx->cqe_cached = &rings->cqes[off];
+ 	ctx->cqe_sentinel = ctx->cqe_cached + len;
+-	return ctx->cqe_cached++;
++	ctx->cqe_cached++;
++	return &rings->cqes[off << shift];
+ }
+ 
+ static inline struct io_uring_cqe *io_get_cqe(struct io_ring_ctx *ctx)
+ {
+-	if (likely(ctx->cqe_cached < ctx->cqe_sentinel)) {
++	if (likely(ctx->cqe_cached < ctx->cqe_sentinel && !(ctx->flags & IORING_SETUP_CQE32))) {
+ 		ctx->cached_cq_tail++;
+ 		return ctx->cqe_cached++;
+ 	}
+-- 
+2.30.2
+

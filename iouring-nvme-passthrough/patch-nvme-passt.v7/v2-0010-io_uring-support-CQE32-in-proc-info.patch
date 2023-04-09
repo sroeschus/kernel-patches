@@ -1,0 +1,55 @@
+From 4555d7b588efd2e6c121328db257029df9702df5 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Apr 2022 11:31:09 -0700
+Subject: [PATCH v2 10/12] io_uring: support CQE32 in /proc info
+
+This exposes the extra1 and extra2 fields in the /proc output.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 15 +++++++++++++--
+ 1 file changed, 13 insertions(+), 2 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 366f49969b31..a5fbad91800c 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -11345,10 +11345,14 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
+ 	unsigned int sq_tail = READ_ONCE(r->sq.tail);
+ 	unsigned int cq_head = READ_ONCE(r->cq.head);
+ 	unsigned int cq_tail = READ_ONCE(r->cq.tail);
++	unsigned int cq_shift = 0;
+ 	unsigned int sq_entries, cq_entries;
+ 	bool has_lock;
+ 	unsigned int i;
+ 
++	if (ctx->flags & IORING_SETUP_CQE32)
++		cq_shift = 1;
++
+ 	/*
+ 	 * we may get imprecise sqe and cqe info if uring is actively running
+ 	 * since we get cached_sq_head and cached_cq_tail without uring_lock
+@@ -11381,11 +11385,18 @@ static __cold void __io_uring_show_fdinfo(struct io_ring_ctx *ctx,
+ 	cq_entries = min(cq_tail - cq_head, ctx->cq_entries);
+ 	for (i = 0; i < cq_entries; i++) {
+ 		unsigned int entry = i + cq_head;
+-		struct io_uring_cqe *cqe = &r->cqes[entry & cq_mask];
++		struct io_uring_cqe *cqe = &r->cqes[(entry & cq_mask) << cq_shift];
+ 
+-		seq_printf(m, "%5u: user_data:%llu, res:%d, flag:%x\n",
++		if (!(ctx->flags & IORING_SETUP_CQE32)) {
++			seq_printf(m, "%5u: user_data:%llu, res:%d, flag:%x\n",
+ 			   entry & cq_mask, cqe->user_data, cqe->res,
+ 			   cqe->flags);
++		} else {
++			seq_printf(m, "%5u: user_data:%llu, res:%d, flag:%x, "
++				"extra1:%llu, extra2:%llu\n",
++				entry & cq_mask, cqe->user_data, cqe->res,
++				cqe->flags, cqe->b[0].extra1, cqe->b[0].extra2);
++		}
+ 	}
+ 
+ 	/*
+-- 
+2.30.2
+

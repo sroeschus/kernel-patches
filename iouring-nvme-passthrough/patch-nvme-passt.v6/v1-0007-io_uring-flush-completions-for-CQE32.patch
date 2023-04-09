@@ -1,0 +1,37 @@
+From fce211adb287888d8b3aad02f3843c7ffc5fca26 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Apr 2022 13:44:18 -0700
+Subject: [PATCH v1 07/11] io_uring: flush completions for CQE32
+
+This flushes the completions according to their CQE type: the same
+processing is done for the default CQE size, but for large CQE's the
+extra1 and extra2 fields are filled in.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ fs/io_uring.c | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index bd352815b9e7..ff6229b6df16 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -2877,8 +2877,12 @@ static void __io_submit_flush_completions(struct io_ring_ctx *ctx)
+ 			struct io_kiocb *req = container_of(node, struct io_kiocb,
+ 						    comp_list);
+ 
+-			if (!(req->flags & REQ_F_CQE_SKIP))
+-				__io_fill_cqe_req_filled(ctx, req);
++			if (!(req->flags & REQ_F_CQE_SKIP)) {
++				if (!(ctx->flags & IORING_SETUP_CQE32))
++					__io_fill_cqe_req_filled(ctx, req);
++				else
++					__io_fill_cqe32_req_filled(ctx, req);
++			}
+ 		}
+ 
+ 		io_commit_cqring(ctx);
+-- 
+2.30.2
+

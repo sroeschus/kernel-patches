@@ -1,0 +1,30 @@
+From 65f74ca21e445c702de622cba914ff61c3899f43 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Apr 2022 13:44:22 -0700
+Subject: [PATCH v2 11/12] io_uring: enable CQE32
+
+This enables large CQE's in the uring setup.
+
+Co-developed-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ fs/io_uring.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index a5fbad91800c..8bdf253b9462 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -11742,7 +11742,7 @@ static long io_uring_setup(u32 entries, struct io_uring_params __user *params)
+ 			IORING_SETUP_SQ_AFF | IORING_SETUP_CQSIZE |
+ 			IORING_SETUP_CLAMP | IORING_SETUP_ATTACH_WQ |
+ 			IORING_SETUP_R_DISABLED | IORING_SETUP_SUBMIT_ALL |
+-			IORING_SETUP_SQE128))
++			IORING_SETUP_SQE128 | IORING_SETUP_CQE32))
+ 		return -EINVAL;
+ 
+ 	return  io_uring_create(entries, &p, params);
+-- 
+2.30.2
+

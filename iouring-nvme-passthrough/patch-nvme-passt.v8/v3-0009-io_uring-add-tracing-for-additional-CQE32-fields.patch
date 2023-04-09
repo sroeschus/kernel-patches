@@ -1,0 +1,120 @@
+From 0540a65206ca7c52c4de1de41d82abb47d8c6a98 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Apr 2022 13:44:20 -0700
+Subject: [PATCH v3 09/12] io_uring: add tracing for additional CQE32 fields
+
+This adds tracing for the extra1 and extra2 fields.
+
+Co-developed-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ fs/io_uring.c                   | 11 ++++++-----
+ include/trace/events/io_uring.h | 18 ++++++++++++++----
+ 2 files changed, 20 insertions(+), 9 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 3630671325ea..9dd075e39850 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -2187,7 +2187,7 @@ static inline bool __io_fill_cqe_req_filled(struct io_ring_ctx *ctx,
+ 	struct io_uring_cqe *cqe;
+ 
+ 	trace_io_uring_complete(req->ctx, req, req->cqe.user_data,
+-				req->cqe.res, req->cqe.flags);
++				req->cqe.res, req->cqe.flags, 0, 0);
+ 
+ 	/*
+ 	 * If we can't get a cq entry, userspace overflowed the
+@@ -2211,7 +2211,7 @@ static inline bool __io_fill_cqe32_req_filled(struct io_ring_ctx *ctx,
+ 	u64 extra2 = req->extra2;
+ 
+ 	trace_io_uring_complete(req->ctx, req, req->cqe.user_data,
+-				req->cqe.res, req->cqe.flags);
++				req->cqe.res, req->cqe.flags, extra1, extra2);
+ 
+ 	/*
+ 	 * If we can't get a cq entry, userspace overflowed the
+@@ -2232,7 +2232,7 @@ static inline bool __io_fill_cqe32_req_filled(struct io_ring_ctx *ctx,
+ 
+ static inline bool __io_fill_cqe_req(struct io_kiocb *req, s32 res, u32 cflags)
+ {
+-	trace_io_uring_complete(req->ctx, req, req->cqe.user_data, res, cflags);
++	trace_io_uring_complete(req->ctx, req, req->cqe.user_data, res, cflags, 0, 0);
+ 	return __io_fill_cqe(req->ctx, req->cqe.user_data, res, cflags);
+ }
+ 
+@@ -2247,7 +2247,8 @@ static inline void __io_fill_cqe32_req(struct io_kiocb *req, s32 res, u32 cflags
+ 	if (req->flags & REQ_F_CQE_SKIP)
+ 		return;
+ 
+-	trace_io_uring_complete(ctx, req, req->cqe.user_data, res, cflags);
++	trace_io_uring_complete(ctx, req, req->cqe.user_data, res, cflags,
++				extra1, extra2);
+ 
+ 	/*
+ 	 * If we can't get a cq entry, userspace overflowed the
+@@ -2271,7 +2272,7 @@ static noinline bool io_fill_cqe_aux(struct io_ring_ctx *ctx, u64 user_data,
+ 				     s32 res, u32 cflags)
+ {
+ 	ctx->cq_extra++;
+-	trace_io_uring_complete(ctx, NULL, user_data, res, cflags);
++	trace_io_uring_complete(ctx, NULL, user_data, res, cflags, 0, 0);
+ 	return __io_fill_cqe(ctx, user_data, res, cflags);
+ }
+ 
+diff --git a/include/trace/events/io_uring.h b/include/trace/events/io_uring.h
+index 8477414d6d06..2eb4f4e47de4 100644
+--- a/include/trace/events/io_uring.h
++++ b/include/trace/events/io_uring.h
+@@ -318,13 +318,16 @@ TRACE_EVENT(io_uring_fail_link,
+  * @user_data:		user data associated with the request
+  * @res:		result of the request
+  * @cflags:		completion flags
++ * @extra1:		extra 64-bit data for CQE32
++ * @extra2:		extra 64-bit data for CQE32
+  *
+  */
+ TRACE_EVENT(io_uring_complete,
+ 
+-	TP_PROTO(void *ctx, void *req, u64 user_data, int res, unsigned cflags),
++	TP_PROTO(void *ctx, void *req, u64 user_data, int res, unsigned cflags,
++		 u64 extra1, u64 extra2),
+ 
+-	TP_ARGS(ctx, req, user_data, res, cflags),
++	TP_ARGS(ctx, req, user_data, res, cflags, extra1, extra2),
+ 
+ 	TP_STRUCT__entry (
+ 		__field(  void *,	ctx		)
+@@ -332,6 +335,8 @@ TRACE_EVENT(io_uring_complete,
+ 		__field(  u64,		user_data	)
+ 		__field(  int,		res		)
+ 		__field(  unsigned,	cflags		)
++		__field(  u64,		extra1		)
++		__field(  u64,		extra2		)
+ 	),
+ 
+ 	TP_fast_assign(
+@@ -340,12 +345,17 @@ TRACE_EVENT(io_uring_complete,
+ 		__entry->user_data	= user_data;
+ 		__entry->res		= res;
+ 		__entry->cflags		= cflags;
++		__entry->extra1		= extra1;
++		__entry->extra2		= extra2;
+ 	),
+ 
+-	TP_printk("ring %p, req %p, user_data 0x%llx, result %d, cflags 0x%x",
++	TP_printk("ring %p, req %p, user_data 0x%llx, result %d, cflags 0x%x "
++		  "extra1 %llu extra2 %llu ",
+ 		__entry->ctx, __entry->req,
+ 		__entry->user_data,
+-		__entry->res, __entry->cflags)
++		__entry->res, __entry->cflags,
++		(unsigned long long) __entry->extra1,
++		(unsigned long long) __entry->extra2)
+ );
+ 
+ /**
+-- 
+2.30.2
+

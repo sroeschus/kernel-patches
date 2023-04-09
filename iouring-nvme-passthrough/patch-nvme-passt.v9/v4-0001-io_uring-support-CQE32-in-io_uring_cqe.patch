@@ -1,0 +1,44 @@
+From 8264972bbfbca609d1899b866cab87dd744a7080 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Apr 2022 13:44:12 -0700
+Subject: [PATCH v4 01/12] io_uring: support CQE32 in io_uring_cqe
+
+This adds the big_cqe array to the struct io_uring_cqe to support large
+CQE's.
+
+Co-developed-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+Reviewed-by: Kanchan Joshi <joshi.k@samsung.com>
+---
+ include/uapi/linux/io_uring.h | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/include/uapi/linux/io_uring.h b/include/uapi/linux/io_uring.h
+index ee677dbd6a6d..7020a434e3b1 100644
+--- a/include/uapi/linux/io_uring.h
++++ b/include/uapi/linux/io_uring.h
+@@ -111,6 +111,7 @@ enum {
+ #define IORING_SETUP_R_DISABLED	(1U << 6)	/* start with ring disabled */
+ #define IORING_SETUP_SUBMIT_ALL	(1U << 7)	/* continue submit on error */
+ #define IORING_SETUP_SQE128	(1U << 8)	/* SQEs are 128b */
++#define IORING_SETUP_CQE32	(1U << 9)	/* CQEs are 32b */
+ 
+ enum {
+ 	IORING_OP_NOP,
+@@ -208,6 +209,12 @@ struct io_uring_cqe {
+ 	__u64	user_data;	/* sqe->data submission passed back */
+ 	__s32	res;		/* result code for this event */
+ 	__u32	flags;
++
++	/*
++	 * If the ring is initialized with IORING_SETUP_CQE32, then this field
++	 * contains 16-bytes of padding, doubling the size of the CQE.
++	 */
++	__u64 big_cqe[];
+ };
+ 
+ /*
+-- 
+2.30.2
+

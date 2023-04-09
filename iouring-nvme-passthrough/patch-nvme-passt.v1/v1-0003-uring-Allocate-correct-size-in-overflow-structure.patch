@@ -1,0 +1,58 @@
+From 33cc3f204d7a4a4bd56ef29e96c13d1546c95f85 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 11 Apr 2022 16:43:13 -0700
+Subject: [PATCH v1 3/4] uring: Allocate correct size in overflow structure for
+ large CQE's
+
+Allocate enough space for large CQE's in the overflow structue. If no
+large CQE's are used, the size of the allocation is unchanged.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c | 15 +++++++++------
+ 1 file changed, 9 insertions(+), 6 deletions(-)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index cbfd7ed1eeb3..bac9deea6c53 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -1933,13 +1933,17 @@ static bool __io_cqring_overflow_flush(struct io_ring_ctx *ctx, bool force)
+ 	while (!list_empty(&ctx->cq_overflow_list)) {
+ 		struct io_uring_cqe *cqe = io_get_cqe(ctx);
+ 		struct io_overflow_cqe *ocqe;
++		size_t cqe_size = sizeof(struct io_uring_cqe);
++
++		if (ctx->flags & IORING_SETUP_CQE32)
++			cqe_size <<= 1;
+ 
+ 		if (!cqe && !force)
+ 			break;
+ 		ocqe = list_first_entry(&ctx->cq_overflow_list,
+ 					struct io_overflow_cqe, list);
+ 		if (cqe)
+-			memcpy(cqe, &ocqe->cqe, sizeof(*cqe));
++			memcpy(cqe, &ocqe->cqe, cqe_size);
+ 		else
+ 			io_account_cq_overflow(ctx);
+ 
+@@ -2031,13 +2035,12 @@ static bool io_cqring_event_overflow(struct io_ring_ctx *ctx, u64 user_data,
+ 				     s32 res, u32 cflags)
+ {
+ 	struct io_overflow_cqe *ocqe;
++	size_t ocq_size = sizeof(struct io_overflow_cqe);
+ 
+-	if (ctx->flags & IORING_SETUP_CQE32) {
+-		io_account_cq_overflow(ctx);
+-		return false;
+-	}
++	if (ctx->flags & IORING_SETUP_CQE32)
++		ocq_size += 16;
+ 
+-	ocqe = kmalloc(sizeof(*ocqe), GFP_ATOMIC | __GFP_ACCOUNT);
++	ocqe = kmalloc(ocq_size, GFP_ATOMIC | __GFP_ACCOUNT);
+ 	if (!ocqe) {
+ 		/*
+ 		 * If we're in ring overflow flush mode, or in task cancel mode,
+-- 
+2.30.2
+

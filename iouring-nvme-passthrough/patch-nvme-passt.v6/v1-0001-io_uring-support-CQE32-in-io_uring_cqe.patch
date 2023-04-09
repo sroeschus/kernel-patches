@@ -1,0 +1,55 @@
+From 43b4166cb0fbf823fc0eead78ee1848245faaca2 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 14 Apr 2022 13:44:12 -0700
+Subject: [PATCH v1 01/11] io_uring: support CQE32 in io_uring_cqe
+
+This adds the struct io_uring_cqe_extra in the structure io_uring_cqe to
+support large CQE's.
+
+Co-developed-by: Jens Axboe <axboe@kernel.dk>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Signed-off-by: Jens Axboe <axboe@kernel.dk>
+---
+ include/uapi/linux/io_uring.h | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/include/uapi/linux/io_uring.h b/include/uapi/linux/io_uring.h
+index ee677dbd6a6d..6f9f9b6a9d15 100644
+--- a/include/uapi/linux/io_uring.h
++++ b/include/uapi/linux/io_uring.h
+@@ -111,6 +111,7 @@ enum {
+ #define IORING_SETUP_R_DISABLED	(1U << 6)	/* start with ring disabled */
+ #define IORING_SETUP_SUBMIT_ALL	(1U << 7)	/* continue submit on error */
+ #define IORING_SETUP_SQE128	(1U << 8)	/* SQEs are 128b */
++#define IORING_SETUP_CQE32	(1U << 9)	/* CQEs are 32b */
+ 
+ enum {
+ 	IORING_OP_NOP,
+@@ -201,6 +202,11 @@ enum {
+ #define IORING_POLL_UPDATE_EVENTS	(1U << 1)
+ #define IORING_POLL_UPDATE_USER_DATA	(1U << 2)
+ 
++struct io_uring_cqe_extra {
++	__u64	extra1;
++	__u64	extra2;
++};
++
+ /*
+  * IO completion data structure (Completion Queue Entry)
+  */
+@@ -208,6 +214,12 @@ struct io_uring_cqe {
+ 	__u64	user_data;	/* sqe->data submission passed back */
+ 	__s32	res;		/* result code for this event */
+ 	__u32	flags;
++
++	/*
++	 * If the ring is initialized with IORING_SETUP_CQE32, then this field
++	 * contains 16-bytes of padding, doubling the size of the CQE.
++	 */
++	struct io_uring_cqe_extra	b[0];
+ };
+ 
+ /*
+-- 
+2.30.2
+
