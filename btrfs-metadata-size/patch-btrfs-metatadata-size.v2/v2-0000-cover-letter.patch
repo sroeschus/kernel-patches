@@ -1,0 +1,57 @@
+From 59c20fd01ce27588cc0005033c5fddb876b3b820 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 15 Jun 2022 12:50:53 -0700
+Subject: [PATCH v2 0/3] btrfs: add sysfs switch to get/set metadata size
+
+The btrfs allocator is currently not ideal for all workloads. It tends
+to suffer from overallocating data block groups and underallocating
+metadata block groups. This results in filesystems becoming read-only
+even though there is plenty of "free" space.
+
+This patch adds the ability to query and set the metadata allocation
+size.
+
+  Patch 1: btrfs: store chunk size in space-info struct.
+    Store the stripe and chunk size in the btrfs_space_info structure
+    to be able to expose and set the metadata allocation size.
+    
+  Patch 2: btrfs: expose chunk size in sysfs.
+    Add a sysfs entry to read and write the above information.
+    
+  btrfs: add force_chunk_alloc sysfs entry to force allocation
+    For testing purposes and under a debug flag add a sysfs entry to
+    force a space allocation.
+
+Changes:
+  V2:
+  - Rename function compute_chunk_size_regular to calc_chunk_size_regular
+  - Rename parameter name from info to fs_info
+  - Rename function compute_chunk_size to calc_chunk_size
+  - Rename parameter name from info to fs_info
+  - Remove some comments based David's comment
+  - Remove unnecessary atomic declaration of chunk_size in struct
+    btrfs_space_info and use READ_ONCE and WRITE_ONCE
+  - Remove unnecessary checks in btrfs_chunk_size_store()
+  - Return EPERM instead of EINVAL in btrfs_chunk_size_store()
+  - Use memparse instead of kstrtoull
+  - Remove unnecessary check in btrfs_force_chunk_alloc_store()
+  - Make chunk allocation in btrfs_force_chunk_alloc_store() with
+    work queue.
+
+
+Stefan Roesch (3):
+  btrfs: store chunk size in space-info struct.
+  btrfs: expose chunk size in sysfs.
+  btrfs: add force_chunk_alloc sysfs entry to force allocation
+
+ fs/btrfs/space-info.c |  37 +++++++++++
+ fs/btrfs/space-info.h |  15 +++++
+ fs/btrfs/sysfs.c      | 139 ++++++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/volumes.c    |  28 +++------
+ 4 files changed, 200 insertions(+), 19 deletions(-)
+
+
+base-commit: b13baccc3850ca8b8cccbf8ed9912dbaa0fdf7f3
+-- 
+2.30.2
+

@@ -1,0 +1,41 @@
+From 10eb672c9a13b80789c400f64d4e4ff74a43fe56 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 8 Feb 2022 10:29:11 -0800
+Subject: [PATCH v1 0/3] btrfs: add sysfs switch to get/set metadata size
+
+The btrfs allocator is currently not ideal for all workloads. It tends
+to suffer from overallocating data block groups and underallocating
+metadata block groups. This results in filesystems becoming read-only
+even though there is plenty of "free" space.
+
+This patch adds the ability to query and set the metadata allocation
+size.
+
+  Patch 1: btrfs: store chunk size in space-info struct.
+    Store the stripe and chunk size in the btrfs_space_info structure
+    to be able to expose and set the metadata allocation size.
+    
+  Patch 2: btrfs: expose chunk size in sysfs.
+    Add a sysfs entry to read and write the above information.
+    
+  btrfs: add force_chunk_alloc sysfs entry to force allocation
+    For testing purposes and under a debug flag add a sysfs entry to
+    force a space allocation.
+
+
+Stefan Roesch (3):
+  btrfs: store chunk size in space-info struct.
+  btrfs: expose chunk size in sysfs.
+  btrfs: add force_chunk_alloc sysfs entry to force allocation
+
+ fs/btrfs/space-info.c |  41 ++++++++++++
+ fs/btrfs/space-info.h |   3 +
+ fs/btrfs/sysfs.c      | 152 ++++++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/volumes.c    |  28 +++-----
+ 4 files changed, 205 insertions(+), 19 deletions(-)
+
+
+base-commit: dfd42facf1e4ada021b939b4e19c935dcdd55566
+-- 
+2.30.2
+

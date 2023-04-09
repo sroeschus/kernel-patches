@@ -1,0 +1,159 @@
+From 59c20fd01ce27588cc0005033c5fddb876b3b820 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 27 Oct 2021 11:01:37 -0700
+Subject: [PATCH v2 3/3] btrfs: add force_chunk_alloc sysfs entry to force
+ allocation
+
+This adds the force_chunk_alloc sysfs entry to be able to force a
+storage allocation. This is a debugging and test feature and is
+enabled with the CONFIG_BTRFS_DEBUG configuration option.
+
+It is stored at
+/sys/fs/btrfs/<uuid>/allocation/<block_type>/force_chunk_alloc.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/space-info.h | 12 +++++++++
+ fs/btrfs/sysfs.c      | 61 +++++++++++++++++++++++++++++++++++++++++++
+ fs/btrfs/volumes.c    |  2 +-
+ 3 files changed, 74 insertions(+), 1 deletion(-)
+
+diff --git a/fs/btrfs/space-info.h b/fs/btrfs/space-info.h
+index 7a72450646c8..492bc2a03b73 100644
+--- a/fs/btrfs/space-info.h
++++ b/fs/btrfs/space-info.h
+@@ -5,6 +5,14 @@
+ 
+ #include "volumes.h"
+ 
++struct btrfs_space_info;
++
++struct btrfs_alloc_chunk_work {
++	struct work_struct work;
++	struct btrfs_fs_info *fs_info;
++	struct btrfs_space_info *space_info;
++};
++
+ struct btrfs_space_info {
+ 	spinlock_t lock;
+ 
+@@ -76,6 +84,10 @@ struct btrfs_space_info {
+ 
+ 	struct kobject kobj;
+ 	struct kobject *block_group_kobjs[BTRFS_NR_RAID_TYPES];
++
++#ifdef CONFIG_BTRFS_DEBUG
++	struct btrfs_alloc_chunk_work async_alloc_work;
++#endif
+ };
+ 
+ struct reserve_ticket {
+diff --git a/fs/btrfs/sysfs.c b/fs/btrfs/sysfs.c
+index 4fefc3bb990e..9e27e677a9e2 100644
+--- a/fs/btrfs/sysfs.c
++++ b/fs/btrfs/sysfs.c
+@@ -62,6 +62,10 @@ struct raid_kobject {
+ 	.store	= _store,						\
+ }
+ 
++#define BTRFS_ATTR_W(_prefix, _name, _store)			        \
++	static struct kobj_attribute btrfs_attr_##_prefix##_##_name =	\
++			__INIT_KOBJ_ATTR(_name, 0200, NULL, _store)
++
+ #define BTRFS_ATTR_RW(_prefix, _name, _show, _store)			\
+ 	static struct kobj_attribute btrfs_attr_##_prefix##_##_name =	\
+ 			__INIT_KOBJ_ATTR(_name, 0644, _show, _store)
+@@ -770,6 +774,57 @@ static ssize_t btrfs_chunk_size_store(struct kobject *kobj,
+ 	return val;
+ }
+ 
++#ifdef CONFIG_BTRFS_DEBUG
++static void async_chunk_alloc_handler(struct work_struct *work)
++{
++	struct btrfs_trans_handle *trans;
++	struct btrfs_alloc_chunk_work *alloc_work = (struct btrfs_alloc_chunk_work *)work;
++
++	trans = btrfs_start_transaction(alloc_work->fs_info->tree_root, 0);
++	if (trans) {
++		int ret;
++
++		ret = btrfs_force_chunk_alloc(trans, alloc_work->space_info->flags);
++		if (ret != 1)
++			btrfs_warn(alloc_work->fs_info, "Cannot allocate new chunk\n");
++	}
++	btrfs_end_transaction(trans);
++}
++
++/*
++ * Request chunk allocation with current chunk size.
++ */
++static ssize_t btrfs_force_chunk_alloc_store(struct kobject *kobj,
++					     struct kobj_attribute *a,
++					     const char *buf, size_t len)
++{
++	struct btrfs_space_info *space_info = to_space_info(kobj);
++	struct btrfs_fs_info *fs_info = to_fs_info(get_btrfs_kobj(kobj));
++	char *endptr;
++	unsigned long val;
++
++	if (!capable(CAP_SYS_ADMIN))
++		return -EPERM;
++
++	if (sb_rdonly(fs_info->sb))
++		return -EROFS;
++
++	val = memparse(buf, &endptr);
++	if (val != 1)
++		return -EINVAL;
++
++	/*
++	 * Allocate new chunk.
++	 */
++	INIT_WORK(&space_info->async_alloc_work.work, async_chunk_alloc_handler);
++	space_info->async_alloc_work.fs_info = fs_info;
++	space_info->async_alloc_work.space_info = space_info;
++
++	queue_work(system_unbound_wq, (struct work_struct *)&space_info->async_alloc_work);
++	return len;
++}
++#endif
++
+ SPACE_INFO_ATTR(flags);
+ SPACE_INFO_ATTR(total_bytes);
+ SPACE_INFO_ATTR(bytes_used);
+@@ -782,6 +837,9 @@ SPACE_INFO_ATTR(disk_used);
+ SPACE_INFO_ATTR(disk_total);
+ BTRFS_ATTR_RW(space_info, chunk_size, btrfs_chunk_size_show,
+ 	      btrfs_chunk_size_store);
++#ifdef CONFIG_BTRFS_DEBUG
++BTRFS_ATTR_W(space_info, force_chunk_alloc, btrfs_force_chunk_alloc_store);
++#endif
+ 
+ static ssize_t btrfs_sinfo_bg_reclaim_threshold_show(struct kobject *kobj,
+ 						     struct kobj_attribute *a,
+@@ -837,6 +895,9 @@ static struct attribute *space_info_attrs[] = {
+ 	BTRFS_ATTR_PTR(space_info, disk_total),
+ 	BTRFS_ATTR_PTR(space_info, bg_reclaim_threshold),
+ 	BTRFS_ATTR_PTR(space_info, chunk_size),
++#ifdef CONFIG_BTRFS_DEBUG
++	BTRFS_ATTR_PTR(space_info, force_chunk_alloc),
++#endif
+ 	NULL,
+ };
+ ATTRIBUTE_GROUPS(space_info);
+diff --git a/fs/btrfs/volumes.c b/fs/btrfs/volumes.c
+index 682bdf565bd1..9cd9d06f5469 100644
+--- a/fs/btrfs/volumes.c
++++ b/fs/btrfs/volumes.c
+@@ -5076,7 +5076,7 @@ static void init_alloc_chunk_ctl_policy_regular(
+ 	space_info = btrfs_find_space_info(fs_devices->fs_info, ctl->type);
+ 	ASSERT(space_info);
+ 
+-	ctl->max_chunk_size = atomic64_read(&space_info->chunk_size);
++	ctl->max_chunk_size = READ_ONCE(space_info->chunk_size);
+ 	ctl->max_stripe_size = ctl->max_chunk_size;
+ 
+ 	if (ctl->type & BTRFS_BLOCK_GROUP_SYSTEM)
+-- 
+2.30.2
+
