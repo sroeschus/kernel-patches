@@ -1,0 +1,69 @@
+From b911a1b19723bfb43a6fa233494435c0beb8cb24 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 30 Jun 2022 15:02:18 -0700
+Subject: [PATCH v1] io_uring: call stack dump on sleep
+
+---
+ fs/io-wq.c            | 1 +
+ fs/io_uring.c         | 2 ++
+ include/linux/sched.h | 1 +
+ kernel/sched/core.c   | 4 ++++
+ 4 files changed, 8 insertions(+)
+
+diff --git a/fs/io-wq.c b/fs/io-wq.c
+index 824623bcf1a5..f7af0c514c0b 100644
+--- a/fs/io-wq.c
++++ b/fs/io-wq.c
+@@ -633,6 +633,7 @@ static int io_wqe_worker(void *data)
+ 
+ 	snprintf(buf, sizeof(buf), "iou-wrk-%d", wq->task->pid);
+ 	set_task_comm(current, buf);
++	current->flags &= ~PF_URING;
+ 
+ 	audit_alloc_kernel(current);
+ 
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 9ab68138f442..4daa6a076388 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -12027,7 +12027,9 @@ SYSCALL_DEFINE6(io_uring_enter, unsigned int, fd, u32, to_submit,
+ 			goto out;
+ 
+ 		mutex_lock(&ctx->uring_lock);
++		current->flags |= PF_URING;
+ 		ret = io_submit_sqes(ctx, to_submit);
++		current->flags &= ~PF_URING;
+ 		if (ret != to_submit) {
+ 			mutex_unlock(&ctx->uring_lock);
+ 			goto out;
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index b3278f8184d5..d76fbf7bbdbd 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1709,6 +1709,7 @@ extern struct pid *cad_pid;
+ 						 * I am cleaning dirty pages from some other bdi. */
+ #define PF_KTHREAD		0x00200000	/* I am a kernel thread */
+ #define PF_RANDOMIZE		0x00400000	/* Randomize virtual address space */
++#define PF_URING                0x00800000
+ #define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_mask */
+ #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
+ #define PF_MEMALLOC_PIN		0x10000000	/* Allocation context constrained to zones which allow long term pinning. */
+diff --git a/kernel/sched/core.c b/kernel/sched/core.c
+index 2a05096559a2..46c4df17ef5e 100644
+--- a/kernel/sched/core.c
++++ b/kernel/sched/core.c
+@@ -5639,6 +5639,10 @@ static inline void schedule_debug(struct task_struct *prev, bool preempt)
+ 		add_taint(TAINT_WARN, LOCKDEP_STILL_OK);
+ 	}
+ #endif
++	if (READ_ONCE(prev->__state) && (prev->flags & PF_URING)) {
++		printk(KERN_ERR "====> schedule in io_uring\n");
++		dump_stack();
++	}
+ 
+ 	if (unlikely(in_atomic_preempt_off())) {
+ 		__schedule_bug(prev);
+
+-- 
+2.30.2
+
