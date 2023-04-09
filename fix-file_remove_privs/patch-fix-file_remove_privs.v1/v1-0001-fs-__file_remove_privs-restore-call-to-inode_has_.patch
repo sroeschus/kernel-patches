@@ -1,0 +1,54 @@
+From bd5821d3c61af93c248beca2d7baf95b9b557a5f Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 16 Aug 2022 08:17:38 -0700
+Subject: [PATCH v1] fs: __file_remove_privs(): restore call to
+ inode_has_no_xattr()
+
+This restores the call to inode_has_no_xattr() in the function
+__file_remove_privs(). In case the dentry_meeds_remove_privs() returned
+0, the function inode_has_no_xattr() was not called.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/inode.c | 14 ++++++++------
+ 1 file changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index 6462276dfdf0..ba1de23c13c1 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2018,23 +2018,25 @@ static int __file_remove_privs(struct file *file, unsigned int flags)
+ {
+ 	struct dentry *dentry = file_dentry(file);
+ 	struct inode *inode = file_inode(file);
+-	int error;
++	int error = 0;
+ 	int kill;
+ 
+ 	if (IS_NOSEC(inode) || !S_ISREG(inode->i_mode))
+ 		return 0;
+ 
+ 	kill = dentry_needs_remove_privs(dentry);
+-	if (kill <= 0)
++	if (kill < 0)
+ 		return kill;
+ 
+-	if (flags & IOCB_NOWAIT)
+-		return -EAGAIN;
++	if (kill) {
++		if (flags & IOCB_NOWAIT)
++			return -EAGAIN;
++
++		error = __remove_privs(file_mnt_user_ns(file), dentry, kill);
++	}
+ 
+-	error = __remove_privs(file_mnt_user_ns(file), dentry, kill);
+ 	if (!error)
+ 		inode_has_no_xattr(inode);
+-
+ 	return error;
+ }
+ 
+-- 
+2.30.2
+
