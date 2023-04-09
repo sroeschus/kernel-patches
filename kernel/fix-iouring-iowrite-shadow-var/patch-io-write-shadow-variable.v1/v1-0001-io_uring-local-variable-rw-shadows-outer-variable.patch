@@ -1,0 +1,46 @@
+From 215c1b9902bae602f745464a38a93a4d4312aa1a Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Mon, 10 Oct 2022 16:37:24 -0700
+Subject: [PATCH v1] io_uring: local variable rw shadows outer variable in
+ io_write
+
+This fixes the shadowing of the outer variable rw in the function
+io_write().
+
+Reported-by: kernel test robot <lkp@intel.com>
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ io_uring/rw.c | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+
+diff --git a/io_uring/rw.c b/io_uring/rw.c
+index a25cd44cd415..453e0ae92160 100644
+--- a/io_uring/rw.c
++++ b/io_uring/rw.c
+@@ -916,7 +916,7 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
+ 			goto copy_iov;
+ 
+ 		if (ret2 != req->cqe.res && ret2 >= 0 && need_complete_io(req)) {
+-			struct io_async_rw *rw;
++			struct io_async_rw *io;
+ 
+ 			trace_io_uring_short_write(req->ctx, kiocb->ki_pos - ret2,
+ 						req->cqe.res, ret2);
+@@ -929,9 +929,9 @@ int io_write(struct io_kiocb *req, unsigned int issue_flags)
+ 			iov_iter_save_state(&s->iter, &s->iter_state);
+ 			ret = io_setup_async_rw(req, iovec, s, true);
+ 
+-			rw = req->async_data;
+-			if (rw)
+-				rw->bytes_done += ret2;
++			io = req->async_data;
++			if (io)
++				io->bytes_done += ret2;
+ 
+ 			if (kiocb->ki_flags & IOCB_WRITE)
+ 				kiocb_end_write(req);
+
+base-commit: e2302539dd4f1c62d96651c07ddb05aa2461d29c
+-- 
+2.30.2
+
