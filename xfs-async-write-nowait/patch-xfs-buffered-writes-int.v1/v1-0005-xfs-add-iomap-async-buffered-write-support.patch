@@ -1,0 +1,76 @@
+From 8152b61a39a5b591549896e000e11d71d2cea41c Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:16:54 -0800
+Subject: [RFC PATCH v1 05/17] xfs: add iomap async buffered write support
+
+This adds the async buffered write support to the iomap layer of XFS. If
+a lock cannot be acquired or additional reads need to be performed, the
+request will return -EAGAIN in case this is an async buffered write request.
+
+This patch changes the helper function xfs_ilock_for_iomap such that the
+lock mode needs to be passed in.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_iomap.c | 14 +++++++++-----
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/fs/xfs/xfs_iomap.c b/fs/xfs/xfs_iomap.c
+index e552ce541ec2..1aea962262ad 100644
+--- a/fs/xfs/xfs_iomap.c
++++ b/fs/xfs/xfs_iomap.c
+@@ -659,7 +659,7 @@ xfs_ilock_for_iomap(
+ 	unsigned		flags,
+ 	unsigned		*lockmode)
+ {
+-	unsigned		mode = XFS_ILOCK_SHARED;
++	unsigned int		mode = *lockmode;
+ 	bool			is_write = flags & (IOMAP_WRITE | IOMAP_ZERO);
+ 
+ 	/*
+@@ -737,7 +737,7 @@ xfs_direct_write_iomap_begin(
+ 	int			nimaps = 1, error = 0;
+ 	bool			shared = false;
+ 	u16			iomap_flags = 0;
+-	unsigned		lockmode;
++	unsigned int		lockmode = XFS_ILOCK_SHARED;
+ 
+ 	ASSERT(flags & (IOMAP_WRITE | IOMAP_ZERO));
+ 
+@@ -881,18 +881,22 @@ xfs_buffered_write_iomap_begin(
+ 	bool			eof = false, cow_eof = false, shared = false;
+ 	int			allocfork = XFS_DATA_FORK;
+ 	int			error = 0;
++	unsigned int		lockmode = XFS_ILOCK_EXCL;
+ 
+ 	if (xfs_is_shutdown(mp))
+ 		return -EIO;
+ 
+ 	/* we can't use delayed allocations when using extent size hints */
+-	if (xfs_get_extsz_hint(ip))
++	if (xfs_get_extsz_hint(ip)) {
+ 		return xfs_direct_write_iomap_begin(inode, offset, count,
+ 				flags, iomap, srcmap);
++	}
+ 
+ 	ASSERT(!XFS_IS_REALTIME_INODE(ip));
+ 
+-	xfs_ilock(ip, XFS_ILOCK_EXCL);
++	error = xfs_ilock_for_iomap(ip, flags, &lockmode);
++	if (error)
++		return error;
+ 
+ 	if (XFS_IS_CORRUPT(mp, !xfs_ifork_has_extents(&ip->i_df)) ||
+ 	    XFS_TEST_ERROR(false, mp, XFS_ERRTAG_BMAPIFORMAT)) {
+@@ -1167,7 +1171,7 @@ xfs_read_iomap_begin(
+ 	xfs_fileoff_t		end_fsb = xfs_iomap_end_fsb(mp, offset, length);
+ 	int			nimaps = 1, error = 0;
+ 	bool			shared = false;
+-	unsigned		lockmode;
++	unsigned int		lockmode = XFS_ILOCK_SHARED;
+ 
+ 	ASSERT(!(flags & (IOMAP_WRITE | IOMAP_ZERO)));
+ 
+-- 
+2.30.2
+

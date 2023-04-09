@@ -1,0 +1,94 @@
+From 76d908f6bbf949c4c7d01006f8d8f3fc872efeaf Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 11 Jan 2022 11:20:30 -0800
+Subject: [PATCH v1 02/14] mm: Introduce do_generic_perform_write
+
+This splits off the do generic_perform_write() function, so an
+additional flags parameter can be specified. It uses the new flag
+parameter to support async buffered writes.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ include/linux/fs.h |  1 +
+ mm/filemap.c       | 20 +++++++++++++++-----
+ 2 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index e2d892b201b0..e62dba6ed453 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -278,6 +278,7 @@ enum positive_aop_returns {
+ #define AOP_FLAG_NOFS			0x0002 /* used by filesystem to direct
+ 						* helper code (eg buffer layer)
+ 						* to clear GFP_FS from alloc */
++#define AOP_FLAGS_NOWAIT		0x0004 /* async nowait buffered writes */
+ 
+ /*
+  * oh the beauties of C type declarations.
+diff --git a/mm/filemap.c b/mm/filemap.c
+index ad8c39d90bf9..d2fb817c0845 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -3725,14 +3725,13 @@ generic_file_direct_write(struct kiocb *iocb, struct iov_iter *from)
+ }
+ EXPORT_SYMBOL(generic_file_direct_write);
+ 
+-ssize_t generic_perform_write(struct file *file,
+-				struct iov_iter *i, loff_t pos)
++static ssize_t do_generic_perform_write(struct file *file, struct iov_iter *i,
++					loff_t pos, int flags)
+ {
+ 	struct address_space *mapping = file->f_mapping;
+ 	const struct address_space_operations *a_ops = mapping->a_ops;
+ 	long status = 0;
+ 	ssize_t written = 0;
+-	unsigned int flags = 0;
+ 
+ 	do {
+ 		struct page *page;
+@@ -3801,6 +3800,12 @@ ssize_t generic_perform_write(struct file *file,
+ 
+ 	return written ? written : status;
+ }
++
++ssize_t generic_perform_write(struct file *file,
++				struct iov_iter *i, loff_t pos)
++{
++	return do_generic_perform_write(file, i, pos, 0);
++}
+ EXPORT_SYMBOL(generic_perform_write);
+ 
+ /**
+@@ -3832,6 +3837,10 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ 	ssize_t		written = 0;
+ 	ssize_t		err;
+ 	ssize_t		status;
++	int             flags = 0;
++
++	if (iocb->ki_flags & IOCB_NOWAIT)
++		flags |= AOP_FLAGS_NOWAIT;
+ 
+ 	/* We can write back this queue in page reclaim */
+ 	current->backing_dev_info = inode_to_bdi(inode);
+@@ -3857,7 +3866,8 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ 		if (written < 0 || !iov_iter_count(from) || IS_DAX(inode))
+ 			goto out;
+ 
+-		status = generic_perform_write(file, from, pos = iocb->ki_pos);
++		status = do_generic_perform_write(file, from, pos = iocb->ki_pos, flags);
++
+ 		/*
+ 		 * If generic_perform_write() returned a synchronous error
+ 		 * then we want to return the number of bytes which were
+@@ -3889,7 +3899,7 @@ ssize_t __generic_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ 			 */
+ 		}
+ 	} else {
+-		written = generic_perform_write(file, from, iocb->ki_pos);
++		written = do_generic_perform_write(file, from, iocb->ki_pos, flags);
+ 		if (likely(written > 0))
+ 			iocb->ki_pos += written;
+ 	}
+-- 
+2.30.2
+

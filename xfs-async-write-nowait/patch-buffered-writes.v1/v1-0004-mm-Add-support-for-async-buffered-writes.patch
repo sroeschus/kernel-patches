@@ -1,0 +1,56 @@
+From 9de441868a46182447b54648589c75343557d194 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 11 Jan 2022 11:25:09 -0800
+Subject: [PATCH v1 04/14] mm: Add support for async buffered writes
+
+This adds support for async buffered writes in the mm layer. When the
+AOP_FLAGS_BUF_WASYNC flag is set, if the page is not already loaded,
+the page gets created without blocking on the allocation.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ mm/filemap.c      | 5 +++++
+ mm/folio-compat.c | 4 ++++
+ 2 files changed, 9 insertions(+)
+
+diff --git a/mm/filemap.c b/mm/filemap.c
+index 0ff4278c3961..19065ad95a4c 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -42,6 +42,7 @@
+ #include <linux/ramfs.h>
+ #include <linux/page_idle.h>
+ #include <linux/migrate.h>
++#include <linux/sched/mm.h>
+ #include <asm/pgalloc.h>
+ #include <asm/tlbflush.h>
+ #include "internal.h"
+@@ -1986,6 +1987,10 @@ struct folio *__filemap_get_folio(struct address_space *mapping, pgoff_t index,
+ 			gfp |= __GFP_WRITE;
+ 		if (fgp_flags & FGP_NOFS)
+ 			gfp &= ~__GFP_FS;
++		if (fgp_flags & FGP_NOWAIT) {
++			gfp |= GFP_ATOMIC;
++			gfp &= ~__GFP_DIRECT_RECLAIM;
++		}
+ 
+ 		folio = filemap_alloc_folio(gfp, 0);
+ 		if (!folio)
+diff --git a/mm/folio-compat.c b/mm/folio-compat.c
+index 749555a232a8..a1d05509b29f 100644
+--- a/mm/folio-compat.c
++++ b/mm/folio-compat.c
+@@ -136,6 +136,10 @@ struct page *grab_cache_page_write_begin(struct address_space *mapping,
+ 
+ 	if (flags & AOP_FLAG_NOFS)
+ 		fgp_flags |= FGP_NOFS;
++
++	if (flags & AOP_FLAGS_NOWAIT)
++		fgp_flags |= FGP_NOWAIT;
++
+ 	return pagecache_get_page(mapping, index, fgp_flags,
+ 			mapping_gfp_mask(mapping));
+ }
+-- 
+2.30.2
+

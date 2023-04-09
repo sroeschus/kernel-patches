@@ -1,0 +1,45 @@
+From 4ddea880cc46c008be0e018bd20131fb47c63552 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 11 Jan 2022 11:27:43 -0800
+Subject: [PATCH v1 08/14] fs: add support for async buffered writes
+
+This adds support for the AOP_FLAGS_BUF_WASYNC flag to the fs layer. If
+a page that is required for writing is not in the page cache, it returns
+EAGAIN instead of ENOMEM.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/buffer.c | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/fs/buffer.c b/fs/buffer.c
+index 5e3067173580..140f57c1cbdd 100644
+--- a/fs/buffer.c
++++ b/fs/buffer.c
+@@ -2069,6 +2069,10 @@ int __block_write_begin_int(struct folio *folio, loff_t pos, unsigned len,
+ 			*wait_bh++=bh;
+ 		}
+ 	}
++
++	/* No wait specified, don't wait for reads to complete. */
++	if (!err && wait_bh > wait && (flags & AOP_FLAGS_NOWAIT))
++		return -EAGAIN;
+ 	/*
+ 	 * If we issued read requests - let them complete.
+ 	 */
+@@ -2143,8 +2147,11 @@ int block_write_begin(struct address_space *mapping, loff_t pos, unsigned len,
+ 	int status;
+ 
+ 	page = grab_cache_page_write_begin(mapping, index, flags);
+-	if (!page)
++	if (!page) {
++		if (flags & AOP_FLAGS_NOWAIT)
++			return -EAGAIN;
+ 		return -ENOMEM;
++	}
+ 
+ 	status = __block_write_begin_int(page_folio(page), pos, len, get_block, NULL, flags);
+ 	if (unlikely(status)) {
+-- 
+2.30.2
+

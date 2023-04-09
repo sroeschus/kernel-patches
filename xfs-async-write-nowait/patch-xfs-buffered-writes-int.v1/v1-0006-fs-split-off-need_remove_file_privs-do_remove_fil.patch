@@ -1,0 +1,112 @@
+From d1eb908cfb5dadf0056550dec13e0ffca9395a64 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 22 Mar 2022 08:49:50 -0700
+Subject: [RFC PATCH v1 06/17] fs: split off need_remove_file_privs()
+ do_remove_file_privs()
+
+This splits off the function need_remove_file_privs() from the function
+do_remove_file_privs() from the function file_remove_privs().
+
+No intended functional changes in this patch.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/inode.c | 57 ++++++++++++++++++++++++++++++++++++------------------
+ 1 file changed, 38 insertions(+), 19 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index 9d9b422504d1..a6d70a1983f8 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2010,17 +2010,8 @@ static int __remove_privs(struct user_namespace *mnt_userns,
+ 	return notify_change(mnt_userns, dentry, &newattrs, NULL);
+ }
+ 
+-/*
+- * Remove special file priviledges (suid, capabilities) when file is written
+- * to or truncated.
+- */
+-int file_remove_privs(struct file *file)
++static int need_file_remove_privs(struct inode *inode, struct dentry *dentry)
+ {
+-	struct dentry *dentry = file_dentry(file);
+-	struct inode *inode = file_inode(file);
+-	int kill;
+-	int error = 0;
+-
+ 	/*
+ 	 * Fast path for nothing security related.
+ 	 * As well for non-regular files, e.g. blkdev inodes.
+@@ -2030,16 +2021,37 @@ int file_remove_privs(struct file *file)
+ 	if (IS_NOSEC(inode) || !S_ISREG(inode->i_mode))
+ 		return 0;
+ 
+-	kill = dentry_needs_remove_privs(dentry);
+-	if (kill < 0)
+-		return kill;
+-	if (kill)
+-		error = __remove_privs(file_mnt_user_ns(file), dentry, kill);
++	return dentry_needs_remove_privs(dentry);
++}
++
++static int do_file_remove_privs(struct file *file, struct inode *inode,
++				struct dentry *dentry, int kill)
++{
++	int error = 0;
++
++	error = __remove_privs(file_mnt_user_ns(file), dentry, kill);
+ 	if (!error)
+ 		inode_has_no_xattr(inode);
+ 
+ 	return error;
+ }
++
++/*
++ * Remove special file privileges (suid, capabilities) when file is written
++ * to or truncated.
++ */
++int file_remove_privs(struct file *file)
++{
++	struct dentry *dentry = file_dentry(file);
++	struct inode *inode = file_inode(file);
++	int kill;
++
++	kill = need_file_remove_privs(inode, dentry);
++	if (kill <= 0)
++		return kill;
++
++	return do_file_remove_privs(file, inode, dentry, kill);
++}
+ EXPORT_SYMBOL(file_remove_privs);
+ 
+ /**
+@@ -2093,15 +2105,22 @@ EXPORT_SYMBOL(file_update_time);
+ /* Caller must hold the file's inode lock */
+ int file_modified(struct file *file)
+ {
+-	int err;
++	int ret;
++	struct dentry *dentry = file_dentry(file);
++	struct inode *inode = file_inode(file);
+ 
+ 	/*
+ 	 * Clear the security bits if the process is not being run by root.
+ 	 * This keeps people from modifying setuid and setgid binaries.
+ 	 */
+-	err = file_remove_privs(file);
+-	if (err)
+-		return err;
++	ret = need_file_remove_privs(inode, dentry);
++	if (ret < 0) {
++		return ret;
++	} else if (ret > 0) {
++		ret = do_file_remove_privs(file, inode, dentry, ret);
++		if (ret)
++			return ret;
++	}
+ 
+ 	if (unlikely(file->f_mode & FMODE_NOCMTIME))
+ 		return 0;
+-- 
+2.30.2
+

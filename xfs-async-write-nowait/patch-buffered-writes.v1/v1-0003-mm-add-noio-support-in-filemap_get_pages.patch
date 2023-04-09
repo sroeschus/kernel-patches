@@ -1,0 +1,38 @@
+From 458176acb0021b5aeaf806ac42e11cbd5ddbae10 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 12 Jan 2022 13:41:56 -0800
+Subject: [PATCH v1 03/14] mm: add noio support in filemap_get_pages
+
+This adds noio support for async buffered writes in filemap_get_pages.
+The idea is to handle the failure gracefully and return -EAGAIN if we
+can't get the memory quickly.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ mm/filemap.c | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/mm/filemap.c b/mm/filemap.c
+index d2fb817c0845..0ff4278c3961 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -2591,10 +2591,15 @@ static int filemap_get_pages(struct kiocb *iocb, struct iov_iter *iter,
+ 		filemap_get_read_batch(mapping, index, last_index, fbatch);
+ 	}
+ 	if (!folio_batch_count(fbatch)) {
++		unsigned int pflags;
++
+ 		if (iocb->ki_flags & (IOCB_NOWAIT | IOCB_WAITQ))
+-			return -EAGAIN;
++			pflags = memalloc_noio_save();
+ 		err = filemap_create_folio(filp, mapping,
+ 				iocb->ki_pos >> PAGE_SHIFT, fbatch);
++		if (iocb->ki_flags & (IOCB_NOWAIT | IOCB_WAITQ))
++			memalloc_noio_restore(pflags);
++
+ 		if (err == AOP_TRUNCATED_PAGE)
+ 			goto retry;
+ 		return err;
+-- 
+2.30.2
+

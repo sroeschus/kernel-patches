@@ -1,0 +1,77 @@
+From d6fe4e1b8ba0ab8ab8729b9999bdf4f2c7be7862 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 12 Jan 2022 14:26:54 -0800
+Subject: [PATCH v1 05/14] fs: split off __alloc_page_buffers function
+
+This splits off the __alloc_page_buffers() function from the
+alloc_page_buffers_function(). In addition it adds a gfp_t parameter, so
+the caller can specify the allocation flags.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/buffer.c | 37 ++++++++++++++++++++++---------------
+ 1 file changed, 22 insertions(+), 15 deletions(-)
+
+diff --git a/fs/buffer.c b/fs/buffer.c
+index 6e6a69a12eed..a1986f95a39a 100644
+--- a/fs/buffer.c
++++ b/fs/buffer.c
+@@ -802,26 +802,13 @@ int remove_inode_buffers(struct inode *inode)
+ 	return ret;
+ }
+ 
+-/*
+- * Create the appropriate buffers when given a page for data area and
+- * the size of each buffer.. Use the bh->b_this_page linked list to
+- * follow the buffers created.  Return NULL if unable to create more
+- * buffers.
+- *
+- * The retry flag is used to differentiate async IO (paging, swapping)
+- * which may not fail from ordinary buffer allocations.
+- */
+-struct buffer_head *alloc_page_buffers(struct page *page, unsigned long size,
+-		bool retry)
++struct buffer_head *__alloc_page_buffers(struct page *page, unsigned long size,
++		gfp_t gfp)
+ {
+ 	struct buffer_head *bh, *head;
+-	gfp_t gfp = GFP_NOFS | __GFP_ACCOUNT;
+ 	long offset;
+ 	struct mem_cgroup *memcg, *old_memcg;
+ 
+-	if (retry)
+-		gfp |= __GFP_NOFAIL;
+-
+ 	/* The page lock pins the memcg */
+ 	memcg = page_memcg(page);
+ 	old_memcg = set_active_memcg(memcg);
+@@ -859,6 +846,26 @@ struct buffer_head *alloc_page_buffers(struct page *page, unsigned long size,
+ 
+ 	goto out;
+ }
++
++/*
++ * Create the appropriate buffers when given a page for data area and
++ * the size of each buffer.. Use the bh->b_this_page linked list to
++ * follow the buffers created.  Return NULL if unable to create more
++ * buffers.
++ *
++ * The retry flag is used to differentiate async IO (paging, swapping)
++ * which may not fail from ordinary buffer allocations.
++ */
++struct buffer_head *alloc_page_buffers(struct page *page, unsigned long size,
++		bool retry)
++{
++	gfp_t gfp = GFP_NOFS | __GFP_ACCOUNT;
++
++	if (retry)
++		gfp |= __GFP_NOFAIL;
++
++	return __alloc_page_buffers(page, size, gfp);
++}
+ EXPORT_SYMBOL_GPL(alloc_page_buffers);
+ 
+ static inline void
+-- 
+2.30.2
+

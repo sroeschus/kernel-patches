@@ -1,0 +1,56 @@
+From 966385c3954673858bccd12da673c6e16ac3ee05 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 11 Jan 2022 11:25:09 -0800
+Subject: [PATCH v2 03/13] mm: Add support for async buffered writes
+
+This adds support for async buffered writes in the mm layer. When the
+AOP_FLAG_NOWAIT flag is set, if the page is not already loaded,
+the page gets created without blocking on the allocation.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ mm/filemap.c      |  1 +
+ mm/folio-compat.c | 12 ++++++++++--
+ 2 files changed, 11 insertions(+), 2 deletions(-)
+
+diff --git a/mm/filemap.c b/mm/filemap.c
+index 5bd692a327d0..f4e2036c5029 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -42,6 +42,7 @@
+ #include <linux/ramfs.h>
+ #include <linux/page_idle.h>
+ #include <linux/migrate.h>
++#include <linux/sched/mm.h>
+ #include <asm/pgalloc.h>
+ #include <asm/tlbflush.h>
+ #include "internal.h"
+diff --git a/mm/folio-compat.c b/mm/folio-compat.c
+index 749555a232a8..8243eeb883c1 100644
+--- a/mm/folio-compat.c
++++ b/mm/folio-compat.c
+@@ -133,11 +133,19 @@ struct page *grab_cache_page_write_begin(struct address_space *mapping,
+ 					pgoff_t index, unsigned flags)
+ {
+ 	unsigned fgp_flags = FGP_LOCK | FGP_WRITE | FGP_CREAT | FGP_STABLE;
++	gfp_t gfp = mapping_gfp_mask(mapping);
+ 
+ 	if (flags & AOP_FLAG_NOFS)
+ 		fgp_flags |= FGP_NOFS;
+-	return pagecache_get_page(mapping, index, fgp_flags,
+-			mapping_gfp_mask(mapping));
++
++	if (flags & AOP_FLAG_NOWAIT) {
++		fgp_flags |= FGP_NOWAIT;
++
++		gfp |= GFP_ATOMIC;
++		gfp &= ~__GFP_DIRECT_RECLAIM;
++	}
++
++	return pagecache_get_page(mapping, index, fgp_flags, gfp);
+ }
+ EXPORT_SYMBOL(grab_cache_page_write_begin);
+ 
+-- 
+2.30.2
+

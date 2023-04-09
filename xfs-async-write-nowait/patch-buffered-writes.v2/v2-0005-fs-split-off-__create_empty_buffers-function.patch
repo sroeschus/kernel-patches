@@ -1,0 +1,60 @@
+From c4d6d1c1a10c68ba448e5089b3062e6d9d16f951 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 12 Jan 2022 14:41:38 -0800
+Subject: [PATCH v2 05/13] fs: split off __create_empty_buffers function
+
+This splits off the function __create_empty_buffers() from the function
+create_empty_buffers. The __create_empty_buffers has an additional gfp
+parameter. This allows the caller to specify the allocation properties.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/buffer.c | 22 ++++++++++++++--------
+ 1 file changed, 14 insertions(+), 8 deletions(-)
+
+diff --git a/fs/buffer.c b/fs/buffer.c
+index 2858eaf433c8..648e1cba6da3 100644
+--- a/fs/buffer.c
++++ b/fs/buffer.c
+@@ -1554,17 +1554,12 @@ void block_invalidatepage(struct page *page, unsigned int offset,
+ EXPORT_SYMBOL(block_invalidatepage);
+ 
+ 
+-/*
+- * We attach and possibly dirty the buffers atomically wrt
+- * __set_page_dirty_buffers() via private_lock.  try_to_free_buffers
+- * is already excluded via the page lock.
+- */
+-void create_empty_buffers(struct page *page,
+-			unsigned long blocksize, unsigned long b_state)
++static void __create_empty_buffers(struct page *page, unsigned long blocksize,
++				unsigned long b_state, gfp_t gfp)
+ {
+ 	struct buffer_head *bh, *head, *tail;
+ 
+-	head = alloc_page_buffers(page, blocksize, true);
++	head = __alloc_page_buffers(page, blocksize, gfp);
+ 	bh = head;
+ 	do {
+ 		bh->b_state |= b_state;
+@@ -1587,6 +1582,17 @@ void create_empty_buffers(struct page *page,
+ 	attach_page_private(page, head);
+ 	spin_unlock(&page->mapping->private_lock);
+ }
++/*
++ * We attach and possibly dirty the buffers atomically wrt
++ * __set_page_dirty_buffers() via private_lock.  try_to_free_buffers
++ * is already excluded via the page lock.
++ */
++void create_empty_buffers(struct page *page,
++			unsigned long blocksize, unsigned long b_state)
++{
++	return __create_empty_buffers(page, blocksize, b_state,
++				GFP_NOFS | __GFP_ACCOUNT | __GFP_NOFAIL);
++}
+ EXPORT_SYMBOL(create_empty_buffers);
+ 
+ /**
+-- 
+2.30.2
+
