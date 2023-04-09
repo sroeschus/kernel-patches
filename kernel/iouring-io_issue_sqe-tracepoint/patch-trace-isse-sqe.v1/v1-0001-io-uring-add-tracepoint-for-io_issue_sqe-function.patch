@@ -1,0 +1,95 @@
+From 265d400305285e349032c912c959686c6c9521dd Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Feb 2022 16:00:02 -0800
+Subject: [PATCH v1] io-uring: add tracepoint for io_issue_sqe function
+
+This adds a new tracepoint for the function io_issue_sqe. This allows
+the user to determine the success of io-uring operations.
+
+With a bpftrace script information like the following can be obtained.
+The first column is the opcode, the second is the return code. The
+result is the number of times the combination of column 1 and column 2
+was encountered.
+
+@req[0, 0]: 142441
+@req[0, -22]: 3
+@req[10, 0]: 3
+@req[10, -105]: 1
+@req[10, -11]: 3
+@req[1, 0]: 21275
+@req[11, 0]: 39
+@req[1, -11]: 106
+@req[12, 0]: 10
+@req[13, 0]: 5
+@req[13, -11]: 263
+...
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c                   |  2 ++
+ include/trace/events/io_uring.h | 34 +++++++++++++++++++++++++++++++++
+ 2 files changed, 36 insertions(+)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 2e04f718319d..a7e2e278a541 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -6856,6 +6856,8 @@ static int io_issue_sqe(struct io_kiocb *req, unsigned int issue_flags)
+ 		break;
+ 	}
+ 
++	trace_io_uring_issue_sqe(req->ctx, req, req->opcode, ret);
++
+ 	if (!io_op_defs[req->opcode].audit_skip)
+ 		audit_uring_exit(!ret, ret);
+ 
+diff --git a/include/trace/events/io_uring.h b/include/trace/events/io_uring.h
+index 7346f0164cf4..4b23a31ecc5b 100644
+--- a/include/trace/events/io_uring.h
++++ b/include/trace/events/io_uring.h
+@@ -366,6 +366,40 @@ TRACE_EVENT(io_uring_submit_sqe,
+ 		  __entry->flags, __entry->force_nonblock, __entry->sq_thread)
+ );
+ 
++/**
++ * io_uring_issue_sqe - called after processing a request
++ *
++ * @ctx:		pointer to a ring context structure
++ * @req:		pointer to a submitted request
++ * @opcode:		opcode of request
++ * @ret:		return code for request
++ *
++ * Allows to track SQE processing and success.
++ */
++TRACE_EVENT(io_uring_issue_sqe,
++
++	TP_PROTO(void *ctx, void *req, u8 opcode, int ret),
++
++	TP_ARGS(ctx, req, opcode, ret),
++
++	TP_STRUCT__entry(
++		__field(void *,	ctx)
++		__field(void *,	req)
++		__field(u8,	opcode)
++		__field(int,	ret)
++	),
++
++	TP_fast_assign(
++		__entry->ctx		= ctx;
++		__entry->req		= req;
++		__entry->opcode		= opcode;
++		__entry->ret		= ret;
++	),
++
++	TP_printk("ring %p, req %p, op %d, ret %d",
++		  __entry->ctx, __entry->req, __entry->opcode, __entry->ret)
++);
++
+ /*
+  * io_uring_poll_arm - called after arming a poll wait if successful
+  *
+
+base-commit: 26291c54e111ff6ba87a164d85d4a4e134b7315c
+-- 
+2.30.2
+

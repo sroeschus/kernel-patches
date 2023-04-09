@@ -1,0 +1,54 @@
+From 213cc7825d417c0569028e965878c2c38b4f629a Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 11 Nov 2021 09:04:16 -0800
+Subject: [PATCH v1 2/4] liburing: add helper functions for setxattr and
+ fsetxattr
+
+Summary:
+
+This adds the helper functions for:
+- fsetxattr
+- setxattr
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ src/include/liburing.h | 23 +++++++++++++++++++++++
+ 1 file changed, 23 insertions(+)
+
+diff --git a/src/include/liburing.h b/src/include/liburing.h
+index 1c978db..38fcc53 100644
+--- a/src/include/liburing.h
++++ b/src/include/liburing.h
+@@ -673,6 +673,29 @@ static inline void io_uring_prep_linkat(struct io_uring_sqe *sqe, int olddfd,
+ 	sqe->hardlink_flags = (__u32) flags;
+ }
+ 
++static inline void io_uring_prep_setxattr(struct io_uring_sqe *sqe,
++					  const char *name,
++					  const char *value,
++					  const char *path,
++					  int flags,
++					  size_t len)
++{
++	io_uring_prep_rw(IORING_OP_SETXATTR, sqe, 0, name, len, (__u64) value);
++	sqe->addr3 = (__u64) path;
++	sqe->xattr_flags = flags;
++}
++
++static inline void io_uring_prep_fsetxattr(struct io_uring_sqe *sqe,
++					   int         fd,
++					   const char *name,
++					   const char *value,
++					   int         flags,
++					   size_t      len)
++{
++	io_uring_prep_rw(IORING_OP_FSETXATTR, sqe, fd, name, len, (__u64) value);
++	sqe->xattr_flags = flags;
++}
++
+ /*
+  * Returns number of unconsumed (if SQPOLL) or unsubmitted entries exist in
+  * the SQ ring
+-- 
+2.30.2
+

@@ -1,0 +1,140 @@
+From 599cffcb4aec21db817cdbfdefcf6dbf969ba62c Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 30 Nov 2021 20:35:15 -0800
+Subject: [PATCH v5 2/2] fstress: add suport for using liburing getxattr
+
+Liburing added support for getxattr. This change adds
+support for this this in fsstress when fsstress is built
+with liburing support.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ ltp/fsstress.c | 63 ++++++++++++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 59 insertions(+), 4 deletions(-)
+
+diff --git a/ltp/fsstress.c b/ltp/fsstress.c
+index bc4db73a..efd154a6 100644
+--- a/ltp/fsstress.c
++++ b/ltp/fsstress.c
+@@ -141,6 +141,7 @@ typedef enum {
+ 	OP_TRUNCATE,
+ 	OP_UNLINK,
+ 	OP_UNRESVSP,
++	OP_URING_GETXATTR,
+ 	OP_URING_READ,
+ 	OP_URING_SETXATTR,
+ 	OP_URING_WRITE,
+@@ -152,6 +153,7 @@ typedef enum {
+ typedef long long opnum_t;
+ 
+ typedef void (*opfnc_t)(opnum_t, long);
++typedef ssize_t (*getxattr_cbk)(const char *, const char *, void *, size_t);
+ typedef int (*setxattr_cbk)(const char *, const char *, const void *, size_t, int);
+ 
+ typedef struct opdesc {
+@@ -274,6 +276,7 @@ void	sync_f(opnum_t, long);
+ void	truncate_f(opnum_t, long);
+ void	unlink_f(opnum_t, long);
+ void	unresvsp_f(opnum_t, long);
++void	uring_getxattr_f(opnum_t, long);
+ void	uring_read_f(opnum_t, long);
+ void	uring_setxattr_f(opnum_t, long);
+ void	uring_write_f(opnum_t, long);
+@@ -345,6 +348,7 @@ struct opdesc	ops[OP_LAST]	= {
+ 	[OP_TRUNCATE]	   	= {"truncate",		truncate_f,		2, 1 },
+ 	[OP_UNLINK]	   	= {"unlink",		unlink_f,		1, 1 },
+ 	[OP_UNRESVSP]	   	= {"unresvsp",		unresvsp_f,		1, 1 },
++	[OP_URING_GETXATTR]	= {"uring_getxattr",	uring_getxattr_f,	1, 0 },
+ 	[OP_URING_READ]	   	= {"uring_read",	uring_read_f,		1, 0 },
+ 	[OP_URING_SETXATTR]	= {"uring_setxattr",	uring_setxattr_f,	1, 1 },
+ 	[OP_URING_WRITE]   	= {"uring_write",	uring_write_f,		1, 1 },
+@@ -3891,8 +3895,44 @@ getdents_f(opnum_t opno, long r)
+ 	closedir(dir);
+ }
+ 
+-void
+-getfattr_f(opnum_t opno, long r)
++static ssize_t
++io_uring_getxattr(const char *path, const char *name, void *value, size_t size)
++{
++	struct io_uring_sqe *sqe;
++	struct io_uring_cqe *cqe;
++	int ret;
++
++	sqe = io_uring_get_sqe(&ring);
++	if (!sqe) {
++		printf("io_uring_get_sqe failed\n");
++		ret = -1;
++		goto out;
++	}
++
++	io_uring_prep_getxattr(sqe, name, value, path, size);
++
++	ret = io_uring_submit_and_wait(&ring, 1);
++	if (ret != 1) {
++		printf("io_uring_submit_and_wait failed, ret=%d\n", ret);
++		ret = -1;
++		goto out;
++	}
++
++	ret = io_uring_wait_cqe(&ring, &cqe);
++	if (ret < 0) {
++		printf("io_uring_wait_cqe failed, ret=%d\n", ret);
++		goto out;
++	}
++
++	ret = cqe->res;
++	io_uring_cqe_seen(&ring, cqe);
++
++out:
++	return ret;
++}
++
++static void
++getfattr_f_cbk(opnum_t opno, long r, getxattr_cbk cbk)
+ {
+ 	fent_t	        *fep;
+ 	int		e;
+@@ -3928,7 +3968,7 @@ getfattr_f(opnum_t opno, long r)
+ 		goto out;
+ 	}
+ 
+-	value_len = getxattr(f.path, name, NULL, 0);
++	value_len = cbk(f.path, name, NULL, 0);
+ 	if (value_len < 0) {
+ 		if (v)
+ 			printf("%d/%lld: getfattr file %s name %s failed %d\n",
+@@ -3950,7 +3990,8 @@ getfattr_f(opnum_t opno, long r)
+ 		goto out;
+ 	}
+ 
+-	e = getxattr(f.path, name, value, value_len) < 0 ? errno : 0;
++	e = cbk(f.path, name, value, value_len) < 0 ? errno : 0;
++
+ out_log:
+ 	if (v)
+ 		printf("%d/%lld: getfattr file %s name %s value length %d %d\n",
+@@ -3960,6 +4001,20 @@ out:
+ 	free_pathname(&f);
+ }
+ 
++void
++uring_getxattr_f(opnum_t opno, long r)
++{
++#ifdef URING
++	getfattr_f_cbk(opno, r, io_uring_getxattr);
++#endif
++}
++
++void
++getfattr_f(opnum_t opno, long r)
++{
++	getfattr_f_cbk(opno, r, getxattr);
++}
++
+ void
+ link_f(opnum_t opno, long r)
+ {
+-- 
+2.30.2
+

@@ -1,0 +1,92 @@
+From 33c333c98b8b17b51d5a2d71acd67fc31c18ba67 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 12 Nov 2021 08:43:34 -0800
+Subject: [PATCH v1 2/2] fstress: add suport for using liburing getxattr
+
+Summary:
+
+Liburing added support for getxattr. This change adds
+support for this this in fsstress when fsstress is built
+with liburing support.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ ltp/fsstress.c | 48 ++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 46 insertions(+), 2 deletions(-)
+
+diff --git a/ltp/fsstress.c b/ltp/fsstress.c
+index 4a5c4afe..df7820d6 100644
+--- a/ltp/fsstress.c
++++ b/ltp/fsstress.c
+@@ -3895,6 +3895,42 @@ getdents_f(opnum_t opno, long r)
+ 	closedir(dir);
+ }
+ 
++static int
++io_uring_getxattr(const char *path, const char *name, void *value, size_t size)
++{
++	struct io_uring_sqe *sqe;
++	struct io_uring_cqe *cqe;
++	int ret;
++
++	sqe = io_uring_get_sqe(&ring);
++	if (!sqe) {
++		printf("io_uring_get_sqe failed\n");
++		ret = -1;
++		goto out;
++	}
++
++	io_uring_prep_getxattr(sqe, name, value, path, size);
++
++	ret = io_uring_submit_and_wait(&ring, 1);
++	if (ret != 1) {
++		printf("io_uring_submit_and_wait failed, ret=%d\n", ret);
++		ret = -1;
++		goto out;
++    	}
++
++	ret = io_uring_wait_cqe(&ring, &cqe);
++	if (ret < 0) {
++		printf("io_uring_wait_cqe failed, ret=%d\n", ret);
++		goto out;
++	}
++
++	ret = cqe->res;
++	io_uring_cqe_seen(&ring, cqe);
++
++out:
++	return ret;
++}
++
+ void
+ getfattr_f(opnum_t opno, long r)
+ {
+@@ -3932,7 +3968,11 @@ getfattr_f(opnum_t opno, long r)
+ 		goto out;
+ 	}
+ 
+-	value_len = getxattr(f.path, name, NULL, 0);
++	if (have_io_uring)
++        	value_len = io_uring_getxattr(f.path, name, NULL, 0);
++    	else
++        	value_len = getxattr(f.path, name, NULL, 0);
++
+ 	if (value_len < 0) {
+ 		if (v)
+ 			printf("%d/%lld: getfattr file %s name %s failed %d\n",
+@@ -3954,7 +3994,11 @@ getfattr_f(opnum_t opno, long r)
+ 		goto out;
+ 	}
+ 
+-	e = getxattr(f.path, name, value, value_len) < 0 ? errno : 0;
++	if (have_io_uring)
++		e = io_uring_getxattr(f.path, name, value, value_len);
++	else
++		e = getxattr(f.path, name, value, value_len) < 0 ? errno : 0;
++
+ out_log:
+ 	if (v)
+ 		printf("%d/%lld: getfattr file %s name %s value length %d %d\n",
+-- 
+2.30.2
+

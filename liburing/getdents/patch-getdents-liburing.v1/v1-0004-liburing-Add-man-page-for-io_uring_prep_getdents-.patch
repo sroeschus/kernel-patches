@@ -1,0 +1,86 @@
+From 651988bbd6253171c1c312da28d8a0af4c240508 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 19 Nov 2021 12:30:20 -0800
+Subject: [PATCH v1 4/4] liburing: Add man page for io_uring_prep_getdents call
+
+Adds the man page for the io_uring_prep_getdents call.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ man/io_uring_prep_getdents.3 | 64 ++++++++++++++++++++++++++++++++++++
+ 1 file changed, 64 insertions(+)
+ create mode 100644 man/io_uring_prep_getdents.3
+
+diff --git a/man/io_uring_prep_getdents.3 b/man/io_uring_prep_getdents.3
+new file mode 100644
+index 0000000..15279f6
+--- /dev/null
++++ b/man/io_uring_prep_getdents.3
+@@ -0,0 +1,64 @@
++.\" Copyright (C) 2021 Stefan Roesch <shr@fb.com>
++.\"
++.\" SPDX-License-Identifier: LGPL-2.0-or-later
++.\"
++.TH io_uring_prep_getdents 3 "November 19, 2021" "liburing-2.1" "liburing Manual"
++.SH NAME
++io_uring_prep_getdents   - prepare getdents64 call
++
++.SH SYNOPSIS
++.nf
++.BR "#include <liburing.h>"
++.PP
++.BI "void io_uring_prep_getdents(struct io_uring_sqe *sqe,"
++.BI "                            int fd,"
++.BI "                            void *buf,"
++.BI "                            unsigned int count,"
++.BI "                            uint64_t offset)"
++
++.SH DESCRIPTION
++.PP
++The io_uring_prep_getdents() prepares a getdents64 request. The submission queue
++entry
++.I sqe
++is setup to use the file descriptor
++.I fd
++to start writing up to
++.I count
++bytes into the buffer
++.I buf
++starting at
++.I offset.
++
++After the getdents call has been prepared it can be submitted with one of the submit
++functions.
++
++.SH RETURN VALUE
++None
++
++.SH EXAMPLE
++A getdents io_uring call can be prepared like in the following code snippet.
++The io_uring_sqe_set_data(3) call is not necessary, but it helps to correlate the
++request with the results.
++
++.BI "void schedule_readdir(struct io_uring_sqe *sqe, struct dir *dir)"
++.fi
++.BI "{"
++.fi
++.BI "   io_uring_prep_getdents(sqe,"
++.fi
++.BI "                          dir->fd,"
++.fi
++.BI "                          dir->buf,"
++.fi
++.BI "                          sizeof(dir->buf),"
++.fi
++.BI "                          dir->off);"
++.fi
++.BI "   io_uring_sqe_set_data(sqe, dir);
++.fi
++.BI "}"
++
++
++.SH SEE ALSO
++.BR io_uring_get_sqe (3), io_uring_sqe_set_data (3), io_uring_submit (3), io_uring_sqe_get_data (3)
+-- 
+2.30.2
+

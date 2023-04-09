@@ -1,0 +1,32 @@
+From 17d8be4ca746062a533826f34b1653c3db3ec4aa Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 19 Nov 2021 12:27:50 -0800
+Subject: [PATCH v1 2/4] liburing: add prepare function for getdents64
+
+Adds the io_uring_prep_getdents() function to setup a getdents64 call.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ src/include/liburing.h | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/src/include/liburing.h b/src/include/liburing.h
+index 169e098..8deae5a 100644
+--- a/src/include/liburing.h
++++ b/src/include/liburing.h
+@@ -672,6 +672,12 @@ static inline void io_uring_prep_linkat(struct io_uring_sqe *sqe, int olddfd,
+ 	sqe->hardlink_flags = (__u32) flags;
+ }
+ 
++static inline void io_uring_prep_getdents(struct io_uring_sqe *sqe, int fd,
++					  void *buf, unsigned int count, uint64_t offset)
++{
++	io_uring_prep_rw(IORING_OP_GETDENTS, sqe, fd, buf, count, offset);
++}
++
+ /*
+  * Returns number of unconsumed (if SQPOLL) or unsubmitted entries exist in
+  * the SQ ring
+-- 
+2.30.2
+

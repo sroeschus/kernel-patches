@@ -1,0 +1,58 @@
+From 9918249962a76392cb69ee11fd8d0d17b9ad1fc4 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 20 Apr 2022 11:55:10 -0700
+Subject: [PATCH v2 0/6] liburing: add support for large CQE sizes
+
+This adds support for large CQE sizes in the liburing layer. The large CQE
+sizes double the size compared to the default CQE size.
+
+To support larger CQE sizes the mmap call needs to be modified to map a larger
+memory region for large CQE's. For default CQE's the size of the mapping stays
+the same.
+Also the ring size calculation needs to change.
+
+Finally when large CQE's are indexed, they need to take into account the bigger
+CQE size. The index manipulation remains unchanged, only when the CQE array is
+accessed, the offset is changed for large CQE's.
+
+The nop test has been modified to test that the new values are set correctly.
+
+Testing:
+The liburing test suite has been run with the four different configurations:
+- default
+- large SQE
+- large CQE
+- large SQE & large CQE
+To do this the default setting has been changed for the test run to the above
+values.:
+
+To use these
+changes, also the corresponding kernel changes are required.
+
+Changes:
+  V2: the changed kernel definition of io_uring_cqe_extra has been applied to
+      the first patch in this patch series.
+
+
+Stefan Roesch (6):
+  liburing: Update io_uring.h with large CQE kernel changes
+  liburing: increase mmap size for large CQE's
+  liburing: return correct ring size for large CQE's
+  liburing: index large CQE's correctly
+  liburing: add large CQE tests to nop test
+  liburing: Test all configurations with NOP test
+
+ src/include/liburing.h          | 18 +++++++-
+ src/include/liburing/io_uring.h | 13 ++++++
+ src/queue.c                     |  6 ++-
+ src/setup.c                     | 13 ++++--
+ test/nop.c                      | 74 ++++++++++++++++++++-------------
+ test/test.h                     | 35 ++++++++++++++++
+ 6 files changed, 123 insertions(+), 36 deletions(-)
+ create mode 100644 test/test.h
+
+
+base-commit: c0ba24d1215e9f2b08266b28b35436988c6f3543
+-- 
+2.30.2
+

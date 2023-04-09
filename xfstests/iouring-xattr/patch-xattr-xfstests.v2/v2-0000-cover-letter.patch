@@ -1,0 +1,36 @@
+From 8d398a8699963c29555f995c0b53c908aa79c0c6 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 30 Nov 2021 20:40:40 -0800
+Subject: [PATCH v2 0/2] Add support for using liburing xattr
+
+This adds support for using the xattr implementation in liburing.
+
+Patch 1: fstress: add suport for using liburing setxattr
+  Uses the liburing setxattr implementation in fsstress.
+
+Patch 2: fstress: add suport for using liburing getxattr
+  Uses the liburing getxattr implementation in fsstress.
+
+There are two additional patch series related to this:
+- io_uring: add xattr support
+- liburing: add xattr support
+
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+base-commit: 2050356437e3576673ec5ead79ad72eb619f0d72
+---
+V2: - Introduce dedicated functions for uring getxattr and
+      uring setxattr, so they are not automatically linked
+      in if liburing is available.
+
+
+Stefan Roesch (2):
+  fstress: add suport for using liburing setxattr
+  fstress: add suport for using liburing getxattr
+
+ ltp/fsstress.c | 122 ++++++++++++++++++++++++++++++++++++++++++++++---
+ 1 file changed, 116 insertions(+), 6 deletions(-)
+
+-- 
+2.30.2
+

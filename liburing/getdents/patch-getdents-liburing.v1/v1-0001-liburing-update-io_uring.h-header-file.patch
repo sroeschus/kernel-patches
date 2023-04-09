@@ -1,0 +1,27 @@
+From 1d7da1b418f0a4cad10736a5c110ee73461ea99a Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 19 Nov 2021 12:25:51 -0800
+Subject: [PATCH v1 1/4] liburing: update io_uring.h header file
+
+Update io_uring.h header file with new op code for getdents64.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ src/include/liburing/io_uring.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/src/include/liburing/io_uring.h b/src/include/liburing/io_uring.h
+index 61683bd..5a1f9f9 100644
+--- a/src/include/liburing/io_uring.h
++++ b/src/include/liburing/io_uring.h
+@@ -144,6 +144,7 @@ enum {
+ 	IORING_OP_MKDIRAT,
+ 	IORING_OP_SYMLINKAT,
+ 	IORING_OP_LINKAT,
++	IORING_OP_GETDENTS,
+ 
+ 	/* this goes last, obviously */
+ 	IORING_OP_LAST,
+-- 
+2.30.2
+

@@ -1,0 +1,44 @@
+From 713ee872e0ebe2d71e53e733ac4ca3e3e0ee9055 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 29 Nov 2021 13:09:12 -0800
+Subject: [PATCH v1 0/4] liburing: support xattr functions
+
+Add xattr support and testing to liburing
+
+Patch 1: liburing: update io_uring
+  Update io_uring.h with io_uring kernel changes.
+
+Patch 2: liburing: add fsetxattr and setxattr
+  Add new helper functions for fsetxattr and setxattr support
+  in liburing.
+
+Patch 3: liburing: add fgetxattr and getxattr
+  Add new helper functions for fgetxattr and getxattr support
+  in liburing.
+
+Patch 4: liburing: add new tests for xattr
+  Adds a  new test program to test the xattr support.
+
+There are also patches for io_uring and xfstests:
+- Adds xattr support for io_uring
+- Add xattr support to fsstress
+
+Stefan Roesch (4):
+  liburing: Update io_uring in liburing
+  liburing: add helper functions for setxattr and fsetxattr
+  liburing: Add helper functions for fgetxattr and getxattr
+  liburing: Add new test program to verify xattr support
+
+ src/include/liburing.h          |  47 +++-
+ src/include/liburing/io_uring.h |  10 +-
+ test/Makefile                   |   1 +
+ test/xattr.c                    | 425 ++++++++++++++++++++++++++++++++
+ 4 files changed, 480 insertions(+), 3 deletions(-)
+ create mode 100644 test/xattr.c
+
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+base-commit: 509873c4454012c5810c728695c21911c82acdc4
+-- 
+2.30.2
+

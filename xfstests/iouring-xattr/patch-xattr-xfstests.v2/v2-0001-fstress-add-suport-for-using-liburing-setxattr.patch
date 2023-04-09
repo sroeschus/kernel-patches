@@ -1,0 +1,131 @@
+From 9f7a694366bc586c22f4aaa26bfb1f31c78e26f5 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 12 Nov 2021 08:40:50 -0800
+Subject: [PATCH v2 1/2] fstress: add suport for using liburing setxattr
+
+Summary:
+
+Liburing added support for setxattr. This change adds
+support for this this in fsstress when fsstress is built
+with liburing support.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ ltp/fsstress.c | 59 ++++++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 57 insertions(+), 2 deletions(-)
+
+diff --git a/ltp/fsstress.c b/ltp/fsstress.c
+index 003e0e49..aba7c6f7 100644
+--- a/ltp/fsstress.c
++++ b/ltp/fsstress.c
+@@ -145,12 +145,14 @@ typedef enum {
+ 	OP_URING_WRITE,
+ 	OP_WRITE,
+ 	OP_WRITEV,
++	OP_URING_SETXATTR,
+ 	OP_LAST
+ } opty_t;
+ 
+ typedef long long opnum_t;
+ 
+ typedef void (*opfnc_t)(opnum_t, long);
++typedef int (*setxattr_cbk)(const char *, const char *, const void *, size_t, int);
+ 
+ typedef struct opdesc {
+ 	opty_t	op;
+@@ -277,6 +279,7 @@ void	uring_read_f(opnum_t, long);
+ void	uring_write_f(opnum_t, long);
+ void	write_f(opnum_t, long);
+ void	writev_f(opnum_t, long);
++void	uring_setxattr_f(opnum_t, long);
+ char	*xattr_flag_to_string(int);
+ 
+ opdesc_t	ops[] = {
+@@ -347,6 +350,7 @@ opdesc_t	ops[] = {
+ 	{ OP_URING_WRITE, "uring_write", uring_write_f, 1, 1 },
+ 	{ OP_WRITE, "write", write_f, 4, 1 },
+ 	{ OP_WRITEV, "writev", writev_f, 4, 1 },
++	{ OP_URING_SETXATTR, "uring_setxattr", uring_setxattr_f, 1, 1 },
+ }, *ops_end;
+ 
+ flist_t	flist[FT_nft] = {
+@@ -4779,8 +4783,45 @@ setattr_f(opnum_t opno, long r)
+ 	close(fd);
+ }
+ 
++static int
++io_uring_setxattr(const char *path, const char *name, const void *value, size_t size,
++	  	 int flags)
++{
++	struct io_uring_sqe *sqe;
++	struct io_uring_cqe *cqe;
++	int ret;
++
++	sqe = io_uring_get_sqe(&ring);
++	if (!sqe) {
++		printf("io_uring_get_sqe failed\n");
++		ret = -1;
++		goto out;
++	}
++
++	io_uring_prep_setxattr(sqe, name, value, path, flags, size);
++
++	ret = io_uring_submit_and_wait(&ring, 1);
++	if (ret != 1) {
++		printf("io_uring_submit_and_wait failed, ret=%d\n", ret);
++		ret = -1;
++		goto out;
++    	}
++
++	ret = io_uring_wait_cqe(&ring, &cqe);
++	if (ret < 0) {
++		printf("io_uring_wait_cqe failed, ret=%d\n", ret);
++		goto out;
++	}
++
++	ret = cqe->res;
++	io_uring_cqe_seen(&ring, cqe);
++
++out:
++	return ret;
++}
++
+ void
+-setfattr_f(opnum_t opno, long r)
++setfattr_f_cbk(opnum_t opno, long r, setxattr_cbk cbk)
+ {
+ 	int		e;
+ 	pathname_t	f;
+@@ -4842,7 +4883,7 @@ setfattr_f(opnum_t opno, long r)
+ 		goto out;
+ 	}
+ 
+-	e = setxattr(f.path, name, value, value_len, flag) < 0 ? errno : 0;
++	e = cbk(f.path, name, value, value_len, flag) < 0 ? errno : 0;
+ 	if (e == 0)
+ 		fep->xattr_counter++;
+ 	if (v)
+@@ -4854,6 +4895,20 @@ out:
+ 	free_pathname(&f);
+ }
+ 
++void
++uring_setxattr_f(opnum_t opno, long r)
++{
++#ifdef URING
++	setfattr_f_cbk(opno, r, io_uring_setxattr);
++#endif
++}
++
++void
++setfattr_f(opnum_t opno, long r)
++{
++	setfattr_f_cbk(opno, r, setxattr);
++}
++
+ void
+ snapshot_f(opnum_t opno, long r)
+ {
+-- 
+2.30.2
+

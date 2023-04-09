@@ -1,0 +1,30 @@
+From 5e4aabee5756f5b1766146498f65458f2914c4f1 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 14 Feb 2022 10:01:27 -0800
+Subject: [PATCH v1 0/2] io-uring: use consisten tracepoint format
+
+So far the tracepoints haven't used a consistent format. This change
+adds consistent formatting for the io-uring tracepoints. This makes it
+easier to follow individual requests.
+
+Where it makes sense it uses the following format:
+- context structure pointer
+- request structure pointer
+- user data
+- opcode.
+
+
+
+Stefan Roesch (2):
+  io-uring: add __fill_cqe function
+  io-uring: Make tracepoints consistent.
+
+ fs/io_uring.c                   |  42 +++--
+ include/trace/events/io_uring.h | 320 +++++++++++++++-----------------
+ 2 files changed, 178 insertions(+), 184 deletions(-)
+
+
+base-commit: 754e0b0e35608ed5206d6a67a791563c631cec07
+-- 
+2.30.2
+

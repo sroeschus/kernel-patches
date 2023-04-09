@@ -1,0 +1,80 @@
+From 51724ed915cafcd5f3f2722a479ecc37f6b79037 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 12 Nov 2021 08:40:50 -0800
+Subject: [PATCH v1 1/2] fstress: add suport for using liburing setxattr
+
+Summary:
+
+Liburing added support for setxattr. This change adds
+support for this this in fsstress when fsstress is built
+with liburing support.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ ltp/fsstress.c | 43 ++++++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 42 insertions(+), 1 deletion(-)
+
+diff --git a/ltp/fsstress.c b/ltp/fsstress.c
+index 003e0e49..4a5c4afe 100644
+--- a/ltp/fsstress.c
++++ b/ltp/fsstress.c
+@@ -4779,6 +4779,43 @@ setattr_f(opnum_t opno, long r)
+ 	close(fd);
+ }
+ 
++static int
++io_uring_setxattr(const char *path, const char *name, const void *value, size_t size,
++	  	  int flags)
++{
++	struct io_uring_sqe *sqe;
++	struct io_uring_cqe *cqe;
++	int ret;
++
++	sqe = io_uring_get_sqe(&ring);
++	if (!sqe) {
++		printf("io_uring_get_sqe failed\n");
++		ret = -1;
++		goto out;
++	}
++
++	io_uring_prep_setxattr(sqe, name, value, path, flags, size);
++
++	ret = io_uring_submit_and_wait(&ring, 1);
++	if (ret != 1) {
++		printf("io_uring_submit_and_wait failed, ret=%d\n", ret);
++		ret = -1;
++		goto out;
++    	}
++
++	ret = io_uring_wait_cqe(&ring, &cqe);
++	if (ret < 0) {
++		printf("io_uring_wait_cqe failed, ret=%d\n", ret);
++		goto out;
++	}
++
++	ret = cqe->res;
++	io_uring_cqe_seen(&ring, cqe);
++
++out:
++	return ret;
++}
++
+ void
+ setfattr_f(opnum_t opno, long r)
+ {
+@@ -4842,7 +4879,11 @@ setfattr_f(opnum_t opno, long r)
+ 		goto out;
+ 	}
+ 
+-	e = setxattr(f.path, name, value, value_len, flag) < 0 ? errno : 0;
++	if (have_io_uring)
++		e = io_uring_setxattr(f.path, name, value, value_len, flag);
++	else
++		e = setxattr(f.path, name, value, value_len, flag) < 0 ? errno : 0;
++
+ 	if (e == 0)
+ 		fep->xattr_counter++;
+ 	if (v)
+-- 
+2.30.2
+

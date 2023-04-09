@@ -1,0 +1,33 @@
+From 6121a5dcee9bb269c0f51a2421a792b4a8e0590b Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 12 Apr 2022 10:28:52 -0700
+Subject: [PATCH v2 3/6] liburing: return correct ring size for large CQE's
+
+Return the correct ring_size when large CQE's are used.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ src/setup.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/setup.c b/src/setup.c
+index dd6a712..d2adc7f 100644
+--- a/src/setup.c
++++ b/src/setup.c
+@@ -257,8 +257,11 @@ static size_t rings_size(struct io_uring_params *p, unsigned entries,
+ {
+ 	size_t pages, sq_size, cq_size;
+ 
+-	cq_size = KRING_SIZE;
+-	cq_size += cq_entries * sizeof(struct io_uring_cqe);
++	cq_size = sizeof(struct io_uring_cqe);
++	if (p->flags & IORING_SETUP_CQE32)
++		cq_size += sizeof(struct io_uring_cqe);
++	cq_size *= cq_entries;
++	cq_size += KRING_SIZE;
+ 	cq_size = (cq_size + 63) & ~63UL;
+ 	pages = (size_t) 1 << npages(cq_size, page_size);
+ 
+-- 
+2.30.2
+

@@ -1,0 +1,54 @@
+From 326c49f7aafe659dc60b155569deab891b127180 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 12 Apr 2022 10:03:53 -0700
+Subject: [PATCH v1 1/6] liburing: Update io_uring.h with large CQE kernel
+ changes
+
+This updates the io_uring.h file with the changes in the kernel.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ src/include/liburing/io_uring.h | 13 +++++++++++++
+ 1 file changed, 13 insertions(+)
+
+diff --git a/src/include/liburing/io_uring.h b/src/include/liburing/io_uring.h
+index a38a45b..32cb4bf 100644
+--- a/src/include/liburing/io_uring.h
++++ b/src/include/liburing/io_uring.h
+@@ -113,6 +113,7 @@ enum {
+ #define IORING_SETUP_R_DISABLED	(1U << 6)	/* start with ring disabled */
+ #define IORING_SETUP_SUBMIT_ALL	(1U << 7)	/* continue submit on error */
+ #define IORING_SETUP_SQE128	(1U << 8)	/* SQEs are 128b */
++#define IORING_SETUP_CQE32	(1U << 9)	/* CQEs are 32b */
+ 
+ enum {
+ 	IORING_OP_NOP,
+@@ -198,6 +199,12 @@ enum {
+ #define IORING_POLL_UPDATE_EVENTS	(1U << 1)
+ #define IORING_POLL_UPDATE_USER_DATA	(1U << 2)
+ 
++/* Extra padding for large CQEs. */
++struct io_uring_cqe_extra {
++	__u64	extra1;
++	__u64	extra2;
++};
++
+ /*
+  * IO completion data structure (Completion Queue Entry)
+  */
+@@ -205,6 +212,12 @@ struct io_uring_cqe {
+ 	__u64	user_data;	/* sqe->data submission passed back */
+ 	__s32	res;		/* result code for this event */
+ 	__u32	flags;
++
++	/*
++	 * If the ring is initialized wit IORING_SETUP_CQE32, then this field
++	 * contains 16-bytes of padding, doubling the size fo the CQE.
++	 */
++	struct io_uring_cqe_extra	b[0];
+ };
+ 
+ /*
+-- 
+2.30.2
+

@@ -1,0 +1,41 @@
+From 651988bbd6253171c1c312da28d8a0af4c240508 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Sun, 21 Nov 2021 22:45:57 -0800
+Subject: [PATCH v1 0/4] liburing: add getdents64 support
+
+This adds the getdents support to liburing.
+
+Patch 1: liburing: update io_uring.h header file
+  This updates the io_uring header file with the new enum for
+  the getdents support.
+
+Patch 2: liburing: add prepare function for getdents
+  Adds the io_uring_prep_getdents() function.
+
+Patch 3: liburing: add test program for getdents
+  Adds a new test program to test the getdents support. It queries
+  the current directory and all its subdirectories.
+
+Patch 4: liburing: add new man page
+  Adds a new man page for the io_uring_prep_getdents call.
+
+
+Stefan Roesch (4):
+  liburing: update io_uring.h header file
+  liburing: add prepare function for getdents64
+  liburing: Add test program for getdents call
+  liburing: Add man page for io_uring_prep_getdents call
+
+ man/io_uring_prep_getdents.3    |  64 ++++++++
+ src/include/liburing.h          |   6 +
+ src/include/liburing/io_uring.h |   1 +
+ test/Makefile                   |   1 +
+ test/getdents.c                 | 258 ++++++++++++++++++++++++++++++++
+ 5 files changed, 330 insertions(+)
+ create mode 100644 man/io_uring_prep_getdents.3
+ create mode 100644 test/getdents.c
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+-- 
+2.30.2
+
