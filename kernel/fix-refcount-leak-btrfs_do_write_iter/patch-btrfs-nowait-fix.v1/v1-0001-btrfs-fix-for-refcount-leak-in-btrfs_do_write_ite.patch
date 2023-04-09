@@ -1,0 +1,43 @@
+From 7e9f94aeaa597e059ed83a2b7d150caeb2d408bf Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 26 Sep 2022 09:20:21 -0700
+Subject: [PATCH v1] btrfs: fix for refcount leak in btrfs_do_write_iter()
+
+The patch "btrfs: enable nowait async buffered writes" introduced a
+potential leak in btrfs_do_write_iter() that the count for sync_writers
+is increased, but not decreased.
+
+This commit addresses this problem.
+
+Reported-by: Dan Carpenter <dan.carpenter@oracle.com>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/file.c | 5 ++---
+ 1 file changed, 2 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/file.c b/fs/btrfs/file.c
+index 16052903fa82..c5ea8e545641 100644
+--- a/fs/btrfs/file.c
++++ b/fs/btrfs/file.c
+@@ -2106,14 +2106,13 @@ ssize_t btrfs_do_write_iter(struct kiocb *iocb, struct iov_iter *from,
+ 	 */
+ 	if (BTRFS_FS_ERROR(inode->root->fs_info))
+ 		return -EROFS;
++	if (encoded && (iocb->ki_flags & IOCB_NOWAIT))
++		return -EOPNOTSUPP;
+ 
+ 	if (sync)
+ 		atomic_inc(&inode->sync_writers);
+ 
+ 	if (encoded) {
+-		if (iocb->ki_flags & IOCB_NOWAIT)
+-			return -EOPNOTSUPP;
+-
+ 		num_written = btrfs_encoded_write(iocb, from, encoded);
+ 		num_sync = encoded->len;
+ 	} else if (iocb->ki_flags & IOCB_DIRECT) {
+
+base-commit: f76349cf41451c5c42a99f18a9163377e4b364ff
+-- 
+2.30.2
+

@@ -1,0 +1,167 @@
+From 477c1eb08930ae5c1219b484f587d2ddc4054fbb Mon Sep 17 00:00:00 2001
+From: Josef Bacik <josef@toxicpanda.com>
+Date: Mon, 27 Jun 2022 20:13:33 -0400
+Subject: [PATCH v3 02/12] btrfs: implement a nowait option for tree searches
+
+For NOWAIT IOCB's we'll need a way to tell search to not wait on locks
+or anything.  Accomplish this by adding a path->nowait flag that will
+use trylocks and skip reading of metadata, returning -EAGAIN in either
+of these cases.  For now we only need this for reads, so only the read
+side is handled.  Add an ASSERT() to catch anybody trying to use this
+for writes so they know they'll have to implement the write side.
+
+Signed-off-by: Josef Bacik <josef@toxicpanda.com>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/btrfs/ctree.c   | 39 ++++++++++++++++++++++++++++++++++++---
+ fs/btrfs/ctree.h   |  1 +
+ fs/btrfs/locking.c | 23 +++++++++++++++++++++++
+ fs/btrfs/locking.h |  1 +
+ 4 files changed, 61 insertions(+), 3 deletions(-)
+
+diff --git a/fs/btrfs/ctree.c b/fs/btrfs/ctree.c
+index ebfa35fe1c38..71b238364939 100644
+--- a/fs/btrfs/ctree.c
++++ b/fs/btrfs/ctree.c
+@@ -1447,6 +1447,11 @@ read_block_for_search(struct btrfs_root *root, struct btrfs_path *p,
+ 			return 0;
+ 		}
+ 
++		if (p->nowait) {
++			free_extent_buffer(tmp);
++			return -EAGAIN;
++		}
++
+ 		if (unlock_up)
+ 			btrfs_unlock_up_safe(p, level + 1);
+ 
+@@ -1467,6 +1472,8 @@ read_block_for_search(struct btrfs_root *root, struct btrfs_path *p,
+ 			ret = -EAGAIN;
+ 
+ 		goto out;
++	} else if (p->nowait) {
++		return -EAGAIN;
+ 	}
+ 
+ 	if (unlock_up) {
+@@ -1634,7 +1641,13 @@ static struct extent_buffer *btrfs_search_slot_get_root(struct btrfs_root *root,
+ 		 * We don't know the level of the root node until we actually
+ 		 * have it read locked
+ 		 */
+-		b = btrfs_read_lock_root_node(root);
++		if (p->nowait) {
++			b = btrfs_try_read_lock_root_node(root);
++			if (IS_ERR(b))
++				return b;
++		} else {
++			b = btrfs_read_lock_root_node(root);
++		}
+ 		level = btrfs_header_level(b);
+ 		if (level > write_lock_level)
+ 			goto out;
+@@ -1910,6 +1923,13 @@ int btrfs_search_slot(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 	WARN_ON(p->nodes[0] != NULL);
+ 	BUG_ON(!cow && ins_len);
+ 
++	/*
++	 * For now only allow nowait for read only operations.  There's no
++	 * strict reason why we can't, we just only need it for reads so I'm
++	 * only implementing it for reads right now.
++	 */
++	ASSERT(!p->nowait || !cow);
++
+ 	if (ins_len < 0) {
+ 		lowest_unlock = 2;
+ 
+@@ -1936,7 +1956,12 @@ int btrfs_search_slot(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 
+ 	if (p->need_commit_sem) {
+ 		ASSERT(p->search_commit_root);
+-		down_read(&fs_info->commit_root_sem);
++		if (p->nowait) {
++			if (!down_read_trylock(&fs_info->commit_root_sem))
++				return -EAGAIN;
++		} else {
++			down_read(&fs_info->commit_root_sem);
++		}
+ 	}
+ 
+ again:
+@@ -2082,7 +2107,15 @@ int btrfs_search_slot(struct btrfs_trans_handle *trans, struct btrfs_root *root,
+ 				btrfs_tree_lock(b);
+ 				p->locks[level] = BTRFS_WRITE_LOCK;
+ 			} else {
+-				btrfs_tree_read_lock(b);
++				if (p->nowait) {
++					if (!btrfs_try_tree_read_lock(b)) {
++						free_extent_buffer(b);
++						ret = -EAGAIN;
++						goto done;
++					}
++				} else {
++					btrfs_tree_read_lock(b);
++				}
+ 				p->locks[level] = BTRFS_READ_LOCK;
+ 			}
+ 			p->nodes[level] = b;
+diff --git a/fs/btrfs/ctree.h b/fs/btrfs/ctree.h
+index df8c99c99df9..ca59ba6421a9 100644
+--- a/fs/btrfs/ctree.h
++++ b/fs/btrfs/ctree.h
+@@ -443,6 +443,7 @@ struct btrfs_path {
+ 	 * header (ie. sizeof(struct btrfs_item) is not included).
+ 	 */
+ 	unsigned int search_for_extension:1;
++	unsigned int nowait:1;
+ };
+ #define BTRFS_MAX_EXTENT_ITEM_SIZE(r) ((BTRFS_LEAF_DATA_SIZE(r->fs_info) >> 4) - \
+ 					sizeof(struct btrfs_item))
+diff --git a/fs/btrfs/locking.c b/fs/btrfs/locking.c
+index 9063072b399b..d6c88922d3e2 100644
+--- a/fs/btrfs/locking.c
++++ b/fs/btrfs/locking.c
+@@ -285,6 +285,29 @@ struct extent_buffer *btrfs_read_lock_root_node(struct btrfs_root *root)
+ 	return eb;
+ }
+ 
++/*
++ * Loop around taking references on and locking the root node of the tree in
++ * nowait mode until we end up with a lock on the root node or returning to
++ * avoid blocking.
++ *
++ * Return: root extent buffer with read lock held or -EWOULDBLOCK.
++ */
++struct extent_buffer *btrfs_try_read_lock_root_node(struct btrfs_root *root)
++{
++	struct extent_buffer *eb;
++
++	while (1) {
++		eb = btrfs_root_node(root);
++		if (!btrfs_try_tree_read_lock(eb))
++			return ERR_PTR(-EAGAIN);
++		if (eb == root->node)
++			break;
++		btrfs_tree_read_unlock(eb);
++		free_extent_buffer(eb);
++	}
++	return eb;
++}
++
+ /*
+  * DREW locks
+  * ==========
+diff --git a/fs/btrfs/locking.h b/fs/btrfs/locking.h
+index ab268be09bb5..490c7a79e995 100644
+--- a/fs/btrfs/locking.h
++++ b/fs/btrfs/locking.h
+@@ -94,6 +94,7 @@ int btrfs_try_tree_read_lock(struct extent_buffer *eb);
+ int btrfs_try_tree_write_lock(struct extent_buffer *eb);
+ struct extent_buffer *btrfs_lock_root_node(struct btrfs_root *root);
+ struct extent_buffer *btrfs_read_lock_root_node(struct btrfs_root *root);
++struct extent_buffer *btrfs_try_read_lock_root_node(struct btrfs_root *root);
+ 
+ #ifdef CONFIG_BTRFS_DEBUG
+ static inline void btrfs_assert_tree_write_locked(struct extent_buffer *eb)
+-- 
+2.30.2
+
