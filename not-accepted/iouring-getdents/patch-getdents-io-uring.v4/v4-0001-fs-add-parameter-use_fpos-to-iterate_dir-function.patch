@@ -1,0 +1,74 @@
+From ea04e9e2597810fa79a61abd5da5c3d5f75bb093 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 25 Nov 2021 14:26:51 -0800
+Subject: [PATCH v4 1/3] fs: add parameter use_fpos to iterate_dir function
+
+This adds the use_fpos parameter to the iterate_dir function.
+If use_fpos is true it uses the file position in the file
+structure (existing behavior). If use_fpos is false, it uses
+the pos in the context structure.
+
+This change is required to support getdents in io_uring.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/readdir.c | 25 +++++++++++++++++++++----
+ 1 file changed, 21 insertions(+), 4 deletions(-)
+
+diff --git a/fs/readdir.c b/fs/readdir.c
+index 09e8ed7d4161..e9c197edf73a 100644
+--- a/fs/readdir.c
++++ b/fs/readdir.c
+@@ -36,8 +36,15 @@
+ 	unsafe_copy_to_user(dst, src, len, label);		\
+ } while (0)
+ 
+-
+-int iterate_dir(struct file *file, struct dir_context *ctx)
++/**
++ * do_iterate_dir - iterate over directory
++ * @file    : pointer to file struct of directory
++ * @ctx     : pointer to directory ctx structure
++ * @use_fpos: true : use file offset
++ *            false: use pos in ctx structure
++ */
++static int do_iterate_dir(struct file *file, struct dir_context *ctx,
++			  bool use_fpos)
+ {
+ 	struct inode *inode = file_inode(file);
+ 	bool shared = false;
+@@ -60,12 +67,17 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
+ 
+ 	res = -ENOENT;
+ 	if (!IS_DEADDIR(inode)) {
+-		ctx->pos = file->f_pos;
++		if (use_fpos)
++			ctx->pos = file->f_pos;
++
+ 		if (shared)
+ 			res = file->f_op->iterate_shared(file, ctx);
+ 		else
+ 			res = file->f_op->iterate(file, ctx);
+-		file->f_pos = ctx->pos;
++
++		if (use_fpos)
++			file->f_pos = ctx->pos;
++
+ 		fsnotify_access(file);
+ 		file_accessed(file);
+ 	}
+@@ -76,6 +88,11 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
+ out:
+ 	return res;
+ }
++
++int iterate_dir(struct file *file, struct dir_context *ctx)
++{
++	return do_iterate_dir(file, ctx, true);
++}
+ EXPORT_SYMBOL(iterate_dir);
+ 
+ /*
+-- 
+2.30.2
+

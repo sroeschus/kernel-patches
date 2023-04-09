@@ -1,0 +1,104 @@
+From 32bce1ff1f49590a166a10a4dabf5518f7b58a58 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 19 Nov 2021 14:47:53 -0800
+Subject: [PATCH v7 2/3] fs: split off vfs_getdents function of getdents64
+ syscall
+
+This splits off the vfs_getdents function from the getdents64 system
+call. This allows io_uring to call the vfs_getdents function.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Acked-by: Christian Brauner <christian.brauner@ubuntu.com>
+---
+ fs/internal.h |  8 ++++++++
+ fs/readdir.c  | 36 ++++++++++++++++++++++++++++--------
+ 2 files changed, 36 insertions(+), 8 deletions(-)
+
+diff --git a/fs/internal.h b/fs/internal.h
+index 7979ff8d168c..432ea3ce76ec 100644
+--- a/fs/internal.h
++++ b/fs/internal.h
+@@ -194,3 +194,11 @@ long splice_file_to_pipe(struct file *in,
+ 			 struct pipe_inode_info *opipe,
+ 			 loff_t *offset,
+ 			 size_t len, unsigned int flags);
++
++/*
++ * fs/readdir.c
++ */
++struct linux_dirent64;
++
++int vfs_getdents(struct file *file, struct linux_dirent64 __user *dirent,
++		 unsigned int count, loff_t *pos);
+diff --git a/fs/readdir.c b/fs/readdir.c
+index c1e6612e0f47..1b1fade87525 100644
+--- a/fs/readdir.c
++++ b/fs/readdir.c
+@@ -21,6 +21,7 @@
+ #include <linux/unistd.h>
+ #include <linux/compat.h>
+ #include <linux/uaccess.h>
++#include "internal.h"
+ 
+ #include <asm/unaligned.h>
+ 
+@@ -359,22 +360,25 @@ static int filldir64(struct dir_context *ctx, const char *name, int namlen,
+ 	return -EFAULT;
+ }
+ 
+-SYSCALL_DEFINE3(getdents64, unsigned int, fd,
+-		struct linux_dirent64 __user *, dirent, unsigned int, count)
++/**
++ * vfs_getdents - getdents without fdget
++ * @file    : pointer to file struct of directory
++ * @dirent  : pointer to user directory structure
++ * @count   : size of buffer
++ * @pos     : file pos
++ */
++int vfs_getdents(struct file *file, struct linux_dirent64 __user *dirent,
++		 unsigned int count, loff_t *pos)
+ {
+-	struct fd f;
+ 	struct getdents_callback64 buf = {
+ 		.ctx.actor = filldir64,
++		.ctx.pos = *pos,
+ 		.count = count,
+ 		.current_dir = dirent
+ 	};
+ 	int error;
+ 
+-	f = fdget_pos(fd);
+-	if (!f.file)
+-		return -EBADF;
+-
+-	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
++	error = iterate_dir(file, &buf.ctx, pos);
+ 	if (error >= 0)
+ 		error = buf.error;
+ 	if (buf.prev_reclen) {
+@@ -391,6 +395,22 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
+ 	return error;
+ }
+ 
++SYSCALL_DEFINE3(getdents64, unsigned int, fd,
++		struct linux_dirent64 __user *, dirent, unsigned int, count)
++{
++	struct fd f;
++	int error;
++
++	f = fdget_pos(fd);
++	if (!f.file)
++		return -EBADF;
++
++	error = vfs_getdents(f.file, dirent, count, &f.file->f_pos);
++
++	fdput_pos(f);
++	return error;
++ }
++
+ #ifdef CONFIG_COMPAT
+ struct compat_old_linux_dirent {
+ 	compat_ulong_t	d_ino;
+-- 
+2.30.2
+

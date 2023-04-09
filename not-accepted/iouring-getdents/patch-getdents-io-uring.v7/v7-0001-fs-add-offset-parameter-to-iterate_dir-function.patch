@@ -1,0 +1,265 @@
+From 7be82a3edc309a3486c8e806eb913bac244af03f Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 20 Dec 2021 21:19:07 -0800
+Subject: [PATCH v7 1/3] fs: add offset parameter to iterate_dir function
+
+This change adds the offset parameter to the iterate_dir
+function. The offset paramater allows the caller to specify
+the offset position.
+
+This change is required to support getdents in io_uring.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ arch/alpha/kernel/osf_sys.c |  2 +-
+ fs/ecryptfs/file.c          |  2 +-
+ fs/exportfs/expfs.c         |  2 +-
+ fs/ksmbd/smb2pdu.c          |  3 ++-
+ fs/ksmbd/vfs.c              |  4 ++--
+ fs/nfsd/nfs4recover.c       |  2 +-
+ fs/nfsd/vfs.c               |  2 +-
+ fs/overlayfs/readdir.c      |  6 +++---
+ fs/readdir.c                | 28 ++++++++++++++++++----------
+ include/linux/fs.h          |  2 +-
+ 10 files changed, 31 insertions(+), 22 deletions(-)
+
+diff --git a/arch/alpha/kernel/osf_sys.c b/arch/alpha/kernel/osf_sys.c
+index 8bbeebb73cf0..cf68c459bca6 100644
+--- a/arch/alpha/kernel/osf_sys.c
++++ b/arch/alpha/kernel/osf_sys.c
+@@ -162,7 +162,7 @@ SYSCALL_DEFINE4(osf_getdirentries, unsigned int, fd,
+ 	if (!arg.file)
+ 		return -EBADF;
+ 
+-	error = iterate_dir(arg.file, &buf.ctx);
++	error = iterate_dir(arg.file, &buf.ctx, &arg.file->f_pos);
+ 	if (error >= 0)
+ 		error = buf.error;
+ 	if (count != buf.count)
+diff --git a/fs/ecryptfs/file.c b/fs/ecryptfs/file.c
+index 18d5b91cb573..b68f1945e615 100644
+--- a/fs/ecryptfs/file.c
++++ b/fs/ecryptfs/file.c
+@@ -109,7 +109,7 @@ static int ecryptfs_readdir(struct file *file, struct dir_context *ctx)
+ 		.sb = inode->i_sb,
+ 	};
+ 	lower_file = ecryptfs_file_to_lower(file);
+-	rc = iterate_dir(lower_file, &buf.ctx);
++	rc = iterate_dir(lower_file, &buf.ctx, &lower_file->f_pos);
+ 	ctx->pos = buf.ctx.pos;
+ 	if (rc < 0)
+ 		goto out;
+diff --git a/fs/exportfs/expfs.c b/fs/exportfs/expfs.c
+index 0106eba46d5a..654e2d4b1d4f 100644
+--- a/fs/exportfs/expfs.c
++++ b/fs/exportfs/expfs.c
+@@ -323,7 +323,7 @@ static int get_name(const struct path *path, char *name, struct dentry *child)
+ 	while (1) {
+ 		int old_seq = buffer.sequence;
+ 
+-		error = iterate_dir(file, &buffer.ctx);
++		error = iterate_dir(file, &buffer.ctx, &file->f_pos);
+ 		if (buffer.found) {
+ 			error = 0;
+ 			break;
+diff --git a/fs/ksmbd/smb2pdu.c b/fs/ksmbd/smb2pdu.c
+index 49c9da37315c..fd4cb995d06d 100644
+--- a/fs/ksmbd/smb2pdu.c
++++ b/fs/ksmbd/smb2pdu.c
+@@ -3925,7 +3925,8 @@ int smb2_query_dir(struct ksmbd_work *work)
+ 	dir_fp->readdir_data.private		= &query_dir_private;
+ 	set_ctx_actor(&dir_fp->readdir_data.ctx, __query_dir);
+ 
+-	rc = iterate_dir(dir_fp->filp, &dir_fp->readdir_data.ctx);
++	rc = iterate_dir(dir_fp->filp, &dir_fp->readdir_data.ctx,
++			&dir_fp->filp->f_pos);
+ 	if (rc == 0)
+ 		restart_ctx(&dir_fp->readdir_data.ctx);
+ 	if (rc == -ENOSPC)
+diff --git a/fs/ksmbd/vfs.c b/fs/ksmbd/vfs.c
+index 19d36393974c..5b8e23d3c846 100644
+--- a/fs/ksmbd/vfs.c
++++ b/fs/ksmbd/vfs.c
+@@ -1136,7 +1136,7 @@ int ksmbd_vfs_empty_dir(struct ksmbd_file *fp)
+ 	set_ctx_actor(&readdir_data.ctx, __dir_empty);
+ 	readdir_data.dirent_count = 0;
+ 
+-	err = iterate_dir(fp->filp, &readdir_data.ctx);
++	err = iterate_dir(fp->filp, &readdir_data.ctx, &fp->filp->f_pos);
+ 	if (readdir_data.dirent_count > 2)
+ 		err = -ENOTEMPTY;
+ 	else
+@@ -1186,7 +1186,7 @@ static int ksmbd_vfs_lookup_in_dir(struct path *dir, char *name, size_t namelen)
+ 	if (IS_ERR(dfilp))
+ 		return PTR_ERR(dfilp);
+ 
+-	ret = iterate_dir(dfilp, &readdir_data.ctx);
++	ret = iterate_dir(dfilp, &readdir_data.ctx, &dfilp->f_pos);
+ 	if (readdir_data.dirent_count > 0)
+ 		ret = 0;
+ 	fput(dfilp);
+diff --git a/fs/nfsd/nfs4recover.c b/fs/nfsd/nfs4recover.c
+index 6fedc49726bf..79a2799891e4 100644
+--- a/fs/nfsd/nfs4recover.c
++++ b/fs/nfsd/nfs4recover.c
+@@ -307,7 +307,7 @@ nfsd4_list_rec_dir(recdir_func *f, struct nfsd_net *nn)
+ 		return status;
+ 	}
+ 
+-	status = iterate_dir(nn->rec_file, &ctx.ctx);
++	status = iterate_dir(nn->rec_file, &ctx.ctx, &nn->rec_file->f_pos);
+ 	inode_lock_nested(d_inode(dir), I_MUTEX_PARENT);
+ 
+ 	list_for_each_entry_safe(entry, tmp, &ctx.names, list) {
+diff --git a/fs/nfsd/vfs.c b/fs/nfsd/vfs.c
+index c99857689e2c..085864c25318 100644
+--- a/fs/nfsd/vfs.c
++++ b/fs/nfsd/vfs.c
+@@ -1980,7 +1980,7 @@ static __be32 nfsd_buffered_readdir(struct file *file, struct svc_fh *fhp,
+ 		buf.used = 0;
+ 		buf.full = 0;
+ 
+-		host_err = iterate_dir(file, &buf.ctx);
++		host_err = iterate_dir(file, &buf.ctx, &file->f_pos);
+ 		if (buf.full)
+ 			host_err = 0;
+ 
+diff --git a/fs/overlayfs/readdir.c b/fs/overlayfs/readdir.c
+index 150fdf3bc68d..52167ff9e513 100644
+--- a/fs/overlayfs/readdir.c
++++ b/fs/overlayfs/readdir.c
+@@ -306,7 +306,7 @@ static inline int ovl_dir_read(struct path *realpath,
+ 	do {
+ 		rdd->count = 0;
+ 		rdd->err = 0;
+-		err = iterate_dir(realfile, &rdd->ctx);
++		err = iterate_dir(realfile, &rdd->ctx, &realfile->f_pos);
+ 		if (err >= 0)
+ 			err = rdd->err;
+ 	} while (!err && rdd->count);
+@@ -722,7 +722,7 @@ static int ovl_iterate_real(struct file *file, struct dir_context *ctx)
+ 			return PTR_ERR(rdt.cache);
+ 	}
+ 
+-	err = iterate_dir(od->realfile, &rdt.ctx);
++	err = iterate_dir(od->realfile, &rdt.ctx, &od->realfile->f_pos);
+ 	ctx->pos = rdt.ctx.pos;
+ 
+ 	return err;
+@@ -753,7 +753,7 @@ static int ovl_iterate(struct file *file, struct dir_context *ctx)
+ 		      OVL_TYPE_MERGE(ovl_path_type(dentry->d_parent))))) {
+ 			err = ovl_iterate_real(file, ctx);
+ 		} else {
+-			err = iterate_dir(od->realfile, ctx);
++			err = iterate_dir(od->realfile, ctx, &od->realfile->f_pos);
+ 		}
+ 		goto out;
+ 	}
+diff --git a/fs/readdir.c b/fs/readdir.c
+index 09e8ed7d4161..c1e6612e0f47 100644
+--- a/fs/readdir.c
++++ b/fs/readdir.c
+@@ -36,8 +36,13 @@
+ 	unsafe_copy_to_user(dst, src, len, label);		\
+ } while (0)
+ 
+-
+-int iterate_dir(struct file *file, struct dir_context *ctx)
++/**
++ * iterate_dir - iterate over directory
++ * @file    : pointer to file struct of directory
++ * @ctx     : pointer to directory ctx structure
++ * @pos     : file offset
++ */
++int iterate_dir(struct file *file, struct dir_context *ctx, loff_t *pos)
+ {
+ 	struct inode *inode = file_inode(file);
+ 	bool shared = false;
+@@ -60,12 +65,15 @@ int iterate_dir(struct file *file, struct dir_context *ctx)
+ 
+ 	res = -ENOENT;
+ 	if (!IS_DEADDIR(inode)) {
+-		ctx->pos = file->f_pos;
++		ctx->pos = *pos;
++
+ 		if (shared)
+ 			res = file->f_op->iterate_shared(file, ctx);
+ 		else
+ 			res = file->f_op->iterate(file, ctx);
+-		file->f_pos = ctx->pos;
++
++		*pos = ctx->pos;
++
+ 		fsnotify_access(file);
+ 		file_accessed(file);
+ 	}
+@@ -190,7 +198,7 @@ SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
+ 	if (!f.file)
+ 		return -EBADF;
+ 
+-	error = iterate_dir(f.file, &buf.ctx);
++	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
+ 	if (buf.result)
+ 		error = buf.result;
+ 
+@@ -283,7 +291,7 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd,
+ 	if (!f.file)
+ 		return -EBADF;
+ 
+-	error = iterate_dir(f.file, &buf.ctx);
++	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
+ 	if (error >= 0)
+ 		error = buf.error;
+ 	if (buf.prev_reclen) {
+@@ -366,7 +374,7 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
+ 	if (!f.file)
+ 		return -EBADF;
+ 
+-	error = iterate_dir(f.file, &buf.ctx);
++	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
+ 	if (error >= 0)
+ 		error = buf.error;
+ 	if (buf.prev_reclen) {
+@@ -379,7 +387,7 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd,
+ 		else
+ 			error = count - buf.count;
+ 	}
+-	fdput_pos(f);
++
+ 	return error;
+ }
+ 
+@@ -448,7 +456,7 @@ COMPAT_SYSCALL_DEFINE3(old_readdir, unsigned int, fd,
+ 	if (!f.file)
+ 		return -EBADF;
+ 
+-	error = iterate_dir(f.file, &buf.ctx);
++	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
+ 	if (buf.result)
+ 		error = buf.result;
+ 
+@@ -534,7 +542,7 @@ COMPAT_SYSCALL_DEFINE3(getdents, unsigned int, fd,
+ 	if (!f.file)
+ 		return -EBADF;
+ 
+-	error = iterate_dir(f.file, &buf.ctx);
++	error = iterate_dir(f.file, &buf.ctx, &f.file->f_pos);
+ 	if (error >= 0)
+ 		error = buf.error;
+ 	if (buf.prev_reclen) {
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 6b8dc1a78df6..e1becbe86b07 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -3340,7 +3340,7 @@ const char *simple_get_link(struct dentry *, struct inode *,
+ 			    struct delayed_call *);
+ extern const struct inode_operations simple_symlink_inode_operations;
+ 
+-extern int iterate_dir(struct file *, struct dir_context *);
++extern int iterate_dir(struct file *, struct dir_context *, loff_t *pos);
+ 
+ int vfs_fstatat(int dfd, const char __user *filename, struct kstat *stat,
+ 		int flags);
+-- 
+2.30.2
+

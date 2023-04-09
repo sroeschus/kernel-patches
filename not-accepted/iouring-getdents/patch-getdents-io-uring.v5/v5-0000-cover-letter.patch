@@ -1,0 +1,64 @@
+From bd3d4716e6358ca1c635e3cba31601c8a671ddbf Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 26 Nov 2021 21:57:37 -0800
+Subject: [PATCH v5 0/3] io_uring: add getdents64 support
+
+This series adds support for getdents64 in liburing. The intent is to
+provide a more complete I/O interface for io_uring.
+
+Patch 1: fs: split off do_iterate_dir from iterate_dir function
+  This splits of the function do_iterate_dir() from the iterate_dir()
+  function and adds a new parameter. The new parameter allows the
+  caller to specify if the position is the file position or the
+  position stored in the buffer context.
+
+  The function iterate_dir() calls do_iterate_dir().
+
+Patch 2: fs: split off vfs_getdents function from getdents64 system call
+  This splits of the iterate_dir part of the syscall in its own
+  dedicated function. This allows to call the function directly from
+  liburing.
+
+Patch 3: io_uring: add support for getdents64
+  Adds the functions to io_uring to support getdents64.
+
+There is also a patch series for the changes to liburing. This includes
+a new test. The patch series is called "liburing: add getdents support."
+
+The following tests have been performed:
+- new liburing getdents test program has been run
+- xfstests have been run
+- both tests have been repeated with the kernel memory leak checker
+  and no leaks have been reported.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+v5: - remove old patch (v4 contained a patch file from v3)
+
+V4: - silence compiler warnings
+
+V3: - add do_iterate_dir() function to Patch 1
+    - make iterate_dir() function call do_iterate_dir()
+      This has the advantage that the function signature of iterate_dir
+      does not change
+
+V2: Updated the iterate_dir calls in fs/ksmbd, fs/ecryptfs and arch/alpha with
+    the additional parameter.
+
+
+Stefan Roesch (3):
+  fs: split off do_iterate_dir from iterate_dir function
+  fs: split off vfs_getdents function of getdents64 syscall
+  io_uring: add support for getdents64
+
+ fs/internal.h                 |  8 +++++
+ fs/io_uring.c                 | 52 +++++++++++++++++++++++++++++
+ fs/readdir.c                  | 62 ++++++++++++++++++++++++++++-------
+ include/uapi/linux/io_uring.h |  1 +
+ 4 files changed, 111 insertions(+), 12 deletions(-)
+
+
+base-commit: 4d162e24e9979dcb3d7825229982c172ca4bde54
+-- 
+2.30.2
+
