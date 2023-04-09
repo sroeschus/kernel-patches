@@ -1,0 +1,42 @@
+From a877ee0889120cc5c4d56c7e2b2b451930e460b0 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 9 Feb 2022 10:52:39 -0800
+Subject: [PATCH v1 0/2] io-uring: Make statx api stable 
+
+One of the key architectual tenets of io-uring is to keep the
+parameters for io-uring stable. After the call has been submitted,
+its value can be changed.  Unfortunaltely this is not the case for
+the current statx implementation.
+
+Patches:
+ Patch 1: fs: replace const char* parameter in vfs_statx and do_statx with
+          struct filename
+   Create filename object outside of do_statx and vfs_statx, so io-uring
+   can create the filename object during the prepare phase
+
+ Patch 2: io-uring: Copy path name during prepare stage for statx
+   Create and store filename object during prepare phase
+
+
+There is also a patch for the liburing libray to add a new test case. This
+patch makes sure that the api is stable.
+  "liburing: add test for stable statx api"
+
+The patch has been tested with the liburing test suite and fstests.
+
+
+Stefan Roesch (2):
+  fs: replace const char* parameter in vfs_statx and do_statx with
+    struct filename
+  io-uring: Copy path name during prepare stage for statx
+
+ fs/internal.h |  4 +++-
+ fs/io_uring.c | 22 ++++++++++++++++++++--
+ fs/stat.c     | 49 ++++++++++++++++++++++++++++++++++++-------------
+ 3 files changed, 59 insertions(+), 16 deletions(-)
+
+
+base-commit: e6251ab4551f51fa4cee03523e08051898c3ce82
+-- 
+2.30.2
+
