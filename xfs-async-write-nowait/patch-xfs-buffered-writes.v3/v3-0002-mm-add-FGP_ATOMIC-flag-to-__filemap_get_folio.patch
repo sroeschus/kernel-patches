@@ -1,0 +1,44 @@
+From 5d08c279e701becf75419dacf6d95e8ebea4c89e Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:08:46 -0800
+Subject: [RFC PATCH v3 02/16] mm: add FGP_ATOMIC flag to __filemap_get_folio()
+
+Define FGP_ATOMIC flag and add support for the new flag in the
+function __filemap_get_folio().
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ include/linux/pagemap.h | 1 +
+ mm/filemap.c            | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/include/linux/pagemap.h b/include/linux/pagemap.h
+index 270bf5136c34..f9500f011c14 100644
+--- a/include/linux/pagemap.h
++++ b/include/linux/pagemap.h
+@@ -400,6 +400,7 @@ pgoff_t page_cache_prev_miss(struct address_space *mapping,
+ #define FGP_HEAD		0x00000080
+ #define FGP_ENTRY		0x00000100
+ #define FGP_STABLE		0x00000200
++#define FGP_ATOMIC		0x00000400
+ 
+ struct folio *__filemap_get_folio(struct address_space *mapping, pgoff_t index,
+ 		int fgp_flags, gfp_t gfp);
+diff --git a/mm/filemap.c b/mm/filemap.c
+index ad8c39d90bf9..13578d664dae 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -1986,6 +1986,10 @@ struct folio *__filemap_get_folio(struct address_space *mapping, pgoff_t index,
+ 			gfp |= __GFP_WRITE;
+ 		if (fgp_flags & FGP_NOFS)
+ 			gfp &= ~__GFP_FS;
++		if (fgp_flags & FGP_ATOMIC) {
++			gfp |= GFP_ATOMIC;
++			gfp &= ~__GFP_DIRECT_RECLAIM;
++		}
+ 
+ 		folio = filemap_alloc_folio(gfp, 0);
+ 		if (!folio)
+-- 
+2.30.2
+

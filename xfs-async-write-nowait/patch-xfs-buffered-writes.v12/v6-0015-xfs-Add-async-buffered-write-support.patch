@@ -1,0 +1,70 @@
+From 936ba199b226c16a2de34c36eff572ddfd9ae693 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 24 May 2022 09:53:23 -0700
+Subject: [PATCH v6 15/16] xfs: Add async buffered write support
+
+This adds the async buffered write support to XFS. For async buffered
+write requests, the request will return -EAGAIN if the ilock cannot be
+obtained immediately.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_file.c  | 9 ++++-----
+ fs/xfs/xfs_iomap.c | 5 ++++-
+ 2 files changed, 8 insertions(+), 6 deletions(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index 50dea07f5e56..e9d615f4c209 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -409,7 +409,7 @@ xfs_file_write_checks(
+ 		spin_unlock(&ip->i_flags_lock);
+ 
+ out:
+-	return file_modified(file);
++	return kiocb_modified(iocb);
+ }
+ 
+ static int
+@@ -701,12 +701,11 @@ xfs_file_buffered_write(
+ 	bool			cleared_space = false;
+ 	int			iolock;
+ 
+-	if (iocb->ki_flags & IOCB_NOWAIT)
+-		return -EOPNOTSUPP;
+-
+ write_retry:
+ 	iolock = XFS_IOLOCK_EXCL;
+-	xfs_ilock(ip, iolock);
++	ret = xfs_ilock_iocb(ip, iocb->ki_flags, iolock);
++	if (ret)
++		return ret;
+ 
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+ 	if (ret)
+diff --git a/fs/xfs/xfs_iomap.c b/fs/xfs/xfs_iomap.c
+index 3aa60e53a181..af8c50140f0f 100644
+--- a/fs/xfs/xfs_iomap.c
++++ b/fs/xfs/xfs_iomap.c
+@@ -881,6 +881,7 @@ xfs_buffered_write_iomap_begin(
+ 	bool			eof = false, cow_eof = false, shared = false;
+ 	int			allocfork = XFS_DATA_FORK;
+ 	int			error = 0;
++	unsigned int		lockmode = XFS_ILOCK_EXCL;
+ 
+ 	if (xfs_is_shutdown(mp))
+ 		return -EIO;
+@@ -892,7 +893,9 @@ xfs_buffered_write_iomap_begin(
+ 
+ 	ASSERT(!XFS_IS_REALTIME_INODE(ip));
+ 
+-	xfs_ilock(ip, XFS_ILOCK_EXCL);
++	error = xfs_ilock_for_iomap(ip, flags, &lockmode);
++	if (error)
++		return error;
+ 
+ 	if (XFS_IS_CORRUPT(mp, !xfs_ifork_has_extents(&ip->i_df)) ||
+ 	    XFS_TEST_ERROR(false, mp, XFS_ERRTAG_BMAPIFORMAT)) {
+-- 
+2.30.2
+

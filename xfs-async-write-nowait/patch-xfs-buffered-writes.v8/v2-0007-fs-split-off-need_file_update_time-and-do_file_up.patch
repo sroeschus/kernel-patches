@@ -1,0 +1,141 @@
+From 08e88660a01ac055a61b3e937bbf06d5aac9e84e Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 17 Mar 2022 09:50:22 -0700
+Subject: [RFC PATCH v2 07/16] fs: split off need_file_update_time and
+ do_file_update_time
+
+This splits off the functions need_file_update_time() and
+do_file_update_time() from the function file_update_time().
+
+This is required to support async buffered writes.
+No intended functional changes in this patch.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/inode.c | 71 ++++++++++++++++++++++++++++++++++++------------------
+ 1 file changed, 47 insertions(+), 24 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index a6d70a1983f8..1d0b02763e98 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2054,35 +2054,22 @@ int file_remove_privs(struct file *file)
+ }
+ EXPORT_SYMBOL(file_remove_privs);
+ 
+-/**
+- *	file_update_time	-	update mtime and ctime time
+- *	@file: file accessed
+- *
+- *	Update the mtime and ctime members of an inode and mark the inode
+- *	for writeback.  Note that this function is meant exclusively for
+- *	usage in the file write path of filesystems, and filesystems may
+- *	choose to explicitly ignore update via this function with the
+- *	S_NOCMTIME inode flag, e.g. for network filesystem where these
+- *	timestamps are handled by the server.  This can return an error for
+- *	file systems who need to allocate space in order to update an inode.
+- */
+-
+-int file_update_time(struct file *file)
++static int need_file_update_time(struct inode *inode, struct file *file,
++				struct timespec64 *now)
+ {
+-	struct inode *inode = file_inode(file);
+-	struct timespec64 now;
+ 	int sync_it = 0;
+-	int ret;
++
++	if (unlikely(file->f_mode & FMODE_NOCMTIME))
++		return 0;
+ 
+ 	/* First try to exhaust all avenues to not sync */
+ 	if (IS_NOCMTIME(inode))
+ 		return 0;
+ 
+-	now = current_time(inode);
+-	if (!timespec64_equal(&inode->i_mtime, &now))
++	if (!timespec64_equal(&inode->i_mtime, now))
+ 		sync_it = S_MTIME;
+ 
+-	if (!timespec64_equal(&inode->i_ctime, &now))
++	if (!timespec64_equal(&inode->i_ctime, now))
+ 		sync_it |= S_CTIME;
+ 
+ 	if (IS_I_VERSION(inode) && inode_iversion_need_inc(inode))
+@@ -2091,15 +2078,49 @@ int file_update_time(struct file *file)
+ 	if (!sync_it)
+ 		return 0;
+ 
++	return sync_it;
++}
++
++static int do_file_update_time(struct inode *inode, struct file *file,
++			struct timespec64 *now, int sync_mode)
++{
++	int ret;
++
+ 	/* Finally allowed to write? Takes lock. */
+ 	if (__mnt_want_write_file(file))
+ 		return 0;
+ 
+-	ret = inode_update_time(inode, &now, sync_it);
++	ret = inode_update_time(inode, now, sync_mode);
+ 	__mnt_drop_write_file(file);
+ 
+ 	return ret;
+ }
++
++/**
++ *	file_update_time	-	update mtime and ctime time
++ *	@file: file accessed
++ *
++ *	Update the mtime and ctime members of an inode and mark the inode
++ *	for writeback.  Note that this function is meant exclusively for
++ *	usage in the file write path of filesystems, and filesystems may
++ *	choose to explicitly ignore update via this function with the
++ *	S_NOCMTIME inode flag, e.g. for network filesystem where these
++ *	timestamps are handled by the server.  This can return an error for
++ *	file systems who need to allocate space in order to update an inode.
++ */
++
++int file_update_time(struct file *file)
++{
++	int err;
++	struct inode *inode = file_inode(file);
++	struct timespec64 now = current_time(inode);
++
++	err = need_file_update_time(inode, file, &now);
++	if (err < 0)
++		return err;
++
++	return do_file_update_time(inode, file, &now, err);
++}
+ EXPORT_SYMBOL(file_update_time);
+ 
+ /* Caller must hold the file's inode lock */
+@@ -2108,6 +2129,7 @@ int file_modified(struct file *file)
+ 	int ret;
+ 	struct dentry *dentry = file_dentry(file);
+ 	struct inode *inode = file_inode(file);
++	struct timespec64 now = current_time(inode);
+ 
+ 	/*
+ 	 * Clear the security bits if the process is not being run by root.
+@@ -2122,10 +2144,11 @@ int file_modified(struct file *file)
+ 			return ret;
+ 	}
+ 
+-	if (unlikely(file->f_mode & FMODE_NOCMTIME))
+-		return 0;
++	ret = need_file_update_time(inode, file, &now);
++	if (ret <= 0)
++		return ret;
+ 
+-	return file_update_time(file);
++	return do_file_update_time(inode, file, &now, ret);
+ }
+ EXPORT_SYMBOL(file_modified);
+ 
+-- 
+2.30.2
+

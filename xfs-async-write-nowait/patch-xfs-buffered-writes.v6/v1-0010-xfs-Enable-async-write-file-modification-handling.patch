@@ -1,0 +1,76 @@
+From 012e70e74727a61246db2c4fd7b1b1e6e832344f Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 25 Mar 2022 13:51:45 -0700
+Subject: [RFC PATCH v1 10/18] xfs: Enable async write file modification
+ handling.
+
+This modifies xfs write checks to return -EAGAIN if the request either
+requires to remove privileges or needs to update the file modification
+time. This is required for async buffered writes, so the request gets
+handled in the io worker.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_file.c | 39 ++++++++++++++++++++++++++++++++++++++-
+ 1 file changed, 38 insertions(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index 5bddb1e9e0b3..6f9da1059e8b 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -299,6 +299,43 @@ xfs_file_read_iter(
+ 	return ret;
+ }
+ 
++static int xfs_file_modified(struct file *file, int flags)
++{
++	int ret;
++	struct dentry *dentry = file_dentry(file);
++	struct inode *inode = file_inode(file);
++	struct timespec64 now = current_time(inode);
++
++	/*
++	 * Clear the security bits if the process is not being run by root.
++	 * This keeps people from modifying setuid and setgid binaries.
++	 */
++	ret = need_file_remove_privs(inode, dentry);
++	if (ret < 0) {
++		return ret;
++	} else if (ret > 0) {
++		if (flags & IOCB_NOWAIT)
++			return -EAGAIN;
++
++		ret = do_file_remove_privs(file, inode, dentry, ret);
++		if (ret)
++			return ret;
++	}
++
++	ret = need_file_update_time(inode, file, &now);
++	if (ret <= 0)
++		return ret;
++	if (flags & IOCB_NOWAIT) {
++		if (IS_PENDING_TIME(inode))
++			return 0;
++
++		inode->i_flags |= S_PENDING_TIME;
++		return -EAGAIN;
++	}
++
++	return do_file_update_time(inode, file, &now, ret);
++}
++
+ /*
+  * Common pre-write limit and setup checks.
+  *
+@@ -410,7 +447,7 @@ xfs_file_write_checks(
+ 		spin_unlock(&ip->i_flags_lock);
+ 
+ out:
+-	return file_modified(file);
++	return xfs_file_modified(file, iocb->ki_flags);
+ }
+ 
+ static int
+-- 
+2.30.2
+

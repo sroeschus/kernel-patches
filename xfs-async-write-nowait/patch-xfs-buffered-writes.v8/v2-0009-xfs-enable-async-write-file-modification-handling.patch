@@ -1,0 +1,93 @@
+From 8a3dd079f6b28997614a6f143d457530c624729c Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 25 Mar 2022 13:51:45 -0700
+Subject: [RFC PATCH v2 09/16] xfs: enable async write file modification
+ handling.
+
+This modifies xfs write checks to return -EAGAIN if the request either
+requires to remove privileges or needs to update the file modification
+time. This is required for async buffered writes, so the request gets
+handled in the io worker.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/inode.c         | 19 ++++++++++++++++++-
+ fs/xfs/xfs_file.c  |  2 +-
+ include/linux/fs.h |  1 +
+ 3 files changed, 20 insertions(+), 2 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index fd18b2c1b7c4..40941feaec8d 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2126,6 +2126,13 @@ EXPORT_SYMBOL(file_update_time);
+ 
+ /* Caller must hold the file's inode lock */
+ int file_modified(struct file *file)
++{
++	return file_modified_async(file, 0);
++}
++EXPORT_SYMBOL(file_modified);
++
++/* Caller must hold the file's inode lock */
++int file_modified_async(struct file *file, int flags)
+ {
+ 	int ret;
+ 	struct dentry *dentry = file_dentry(file);
+@@ -2140,6 +2147,9 @@ int file_modified(struct file *file)
+ 	if (ret < 0) {
+ 		return ret;
+ 	} else if (ret > 0) {
++		if (flags & IOCB_NOWAIT)
++			return -EAGAIN;
++
+ 		ret = do_file_remove_privs(file, inode, dentry, ret);
+ 		if (ret)
+ 			return ret;
+@@ -2148,10 +2158,17 @@ int file_modified(struct file *file)
+ 	ret = need_file_update_time(inode, file, &now);
+ 	if (ret <= 0)
+ 		return ret;
++	if (flags & IOCB_NOWAIT) {
++		if (IS_PENDING_TIME(inode))
++			return 0;
++
++		inode->i_flags |= S_PENDING_TIME;
++		return -EAGAIN;
++	}
+ 
+ 	return do_file_update_time(inode, file, &now, ret);
+ }
+-EXPORT_SYMBOL(file_modified);
++EXPORT_SYMBOL(file_modified_async);
+ 
+ int inode_needs_sync(struct inode *inode)
+ {
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index 5bddb1e9e0b3..793918c83755 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -410,7 +410,7 @@ xfs_file_write_checks(
+ 		spin_unlock(&ip->i_flags_lock);
+ 
+ out:
+-	return file_modified(file);
++	return file_modified_async(file, iocb->ki_flags);
+ }
+ 
+ static int
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 3da641dfa6d9..5f3aaf61fb4b 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -2385,6 +2385,7 @@ static inline void file_accessed(struct file *file)
+ }
+ 
+ extern int file_modified(struct file *file);
++extern int file_modified_async(struct file *file, int flags);
+ 
+ int sync_inode_metadata(struct inode *inode, int wait);
+ 
+-- 
+2.30.2
+

@@ -1,0 +1,46 @@
+From c27be48ee378ebe359d38b97c85736bd641c9026 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.cz>
+Date: Tue, 17 May 2022 22:34:50 +0200
+Subject: [PATCH v5 02/16] mm: Move updates of dirty_exceeded into one place
+
+Transition of wb->dirty_exceeded from 0 to 1 happens before we go to
+sleep in balance_dirty_pages() while transition from 1 to 0 happens when
+exiting from balance_dirty_pages(), possibly based on old values. This
+does not make a lot of sense since wb->dirty_exceeded should simply
+reflect whether wb is over dirty limit and so we should ratelimit
+entering to balance_dirty_pages() less. Move the two updates together.
+
+Signed-off-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ mm/page-writeback.c | 7 ++-----
+ 1 file changed, 2 insertions(+), 5 deletions(-)
+
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 8e5e003f0093..89dcc7d8395a 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1720,8 +1720,8 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 				sdtc = mdtc;
+ 		}
+ 
+-		if (dirty_exceeded && !wb->dirty_exceeded)
+-			wb->dirty_exceeded = 1;
++		if (dirty_exceeded != wb->dirty_exceeded)
++			wb->dirty_exceeded = dirty_exceeded;
+ 
+ 		if (time_is_before_jiffies(READ_ONCE(wb->bw_time_stamp) +
+ 					   BANDWIDTH_INTERVAL))
+@@ -1825,9 +1825,6 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 		if (fatal_signal_pending(current))
+ 			break;
+ 	}
+-
+-	if (!dirty_exceeded && wb->dirty_exceeded)
+-		wb->dirty_exceeded = 0;
+ }
+ 
+ static DEFINE_PER_CPU(int, bdp_ratelimits);
+-- 
+2.30.2
+

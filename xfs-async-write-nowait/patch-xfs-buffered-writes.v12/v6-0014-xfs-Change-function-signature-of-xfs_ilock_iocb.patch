@@ -1,0 +1,106 @@
+From eb7fd739d99c37de5bd70de3b29beef00a4c611d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 24 May 2022 09:46:33 -0700
+Subject: [PATCH v6 14/16] xfs: Change function signature of xfs_ilock_iocb()
+
+This changes the function signature of the function xfs_ilock_iocb():
+- the parameter iocb is replaced with ip, passing in an xfs_inode
+- the parameter iocb_flags is added to be able to pass in the iocb flags
+
+This allows to call the function from xfs_file_buffered_writes.
+All the callers are changed accordingly.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_file.c | 23 +++++++++++------------
+ 1 file changed, 11 insertions(+), 12 deletions(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index 5bddb1e9e0b3..50dea07f5e56 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -190,14 +190,13 @@ xfs_file_fsync(
+ 	return error;
+ }
+ 
+-static int
++static inline int
+ xfs_ilock_iocb(
+-	struct kiocb		*iocb,
++	struct xfs_inode	*ip,
++	int			iocb_flags,
+ 	unsigned int		lock_mode)
+ {
+-	struct xfs_inode	*ip = XFS_I(file_inode(iocb->ki_filp));
+-
+-	if (iocb->ki_flags & IOCB_NOWAIT) {
++	if (iocb_flags & IOCB_NOWAIT) {
+ 		if (!xfs_ilock_nowait(ip, lock_mode))
+ 			return -EAGAIN;
+ 	} else {
+@@ -222,7 +221,7 @@ xfs_file_dio_read(
+ 
+ 	file_accessed(iocb->ki_filp);
+ 
+-	ret = xfs_ilock_iocb(iocb, XFS_IOLOCK_SHARED);
++	ret = xfs_ilock_iocb(ip, iocb->ki_flags, XFS_IOLOCK_SHARED);
+ 	if (ret)
+ 		return ret;
+ 	ret = iomap_dio_rw(iocb, to, &xfs_read_iomap_ops, NULL, 0, 0);
+@@ -244,7 +243,7 @@ xfs_file_dax_read(
+ 	if (!iov_iter_count(to))
+ 		return 0; /* skip atime */
+ 
+-	ret = xfs_ilock_iocb(iocb, XFS_IOLOCK_SHARED);
++	ret = xfs_ilock_iocb(ip, iocb->ki_flags, XFS_IOLOCK_SHARED);
+ 	if (ret)
+ 		return ret;
+ 	ret = dax_iomap_rw(iocb, to, &xfs_read_iomap_ops);
+@@ -264,7 +263,7 @@ xfs_file_buffered_read(
+ 
+ 	trace_xfs_file_buffered_read(iocb, to);
+ 
+-	ret = xfs_ilock_iocb(iocb, XFS_IOLOCK_SHARED);
++	ret = xfs_ilock_iocb(ip, iocb->ki_flags, XFS_IOLOCK_SHARED);
+ 	if (ret)
+ 		return ret;
+ 	ret = generic_file_read_iter(iocb, to);
+@@ -343,7 +342,7 @@ xfs_file_write_checks(
+ 	if (*iolock == XFS_IOLOCK_SHARED && !IS_NOSEC(inode)) {
+ 		xfs_iunlock(ip, *iolock);
+ 		*iolock = XFS_IOLOCK_EXCL;
+-		error = xfs_ilock_iocb(iocb, *iolock);
++		error = xfs_ilock_iocb(ip, iocb->ki_flags, *iolock);
+ 		if (error) {
+ 			*iolock = 0;
+ 			return error;
+@@ -516,7 +515,7 @@ xfs_file_dio_write_aligned(
+ 	int			iolock = XFS_IOLOCK_SHARED;
+ 	ssize_t			ret;
+ 
+-	ret = xfs_ilock_iocb(iocb, iolock);
++	ret = xfs_ilock_iocb(ip, iocb->ki_flags, iolock);
+ 	if (ret)
+ 		return ret;
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+@@ -583,7 +582,7 @@ xfs_file_dio_write_unaligned(
+ 		flags = IOMAP_DIO_FORCE_WAIT;
+ 	}
+ 
+-	ret = xfs_ilock_iocb(iocb, iolock);
++	ret = xfs_ilock_iocb(ip, iocb->ki_flags, iolock);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -659,7 +658,7 @@ xfs_file_dax_write(
+ 	ssize_t			ret, error = 0;
+ 	loff_t			pos;
+ 
+-	ret = xfs_ilock_iocb(iocb, iolock);
++	ret = xfs_ilock_iocb(ip, iocb->ki_flags, iolock);
+ 	if (ret)
+ 		return ret;
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+-- 
+2.30.2
+

@@ -1,0 +1,79 @@
+From aa2adeaf6288d6341175cc91e4d43e9526695965 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 17 Mar 2022 09:50:22 -0700
+Subject: [RFC PATCH v4 14/17] fs: split of do_file_update_time from
+ file_update_time
+
+This splits off the function do_file_update_time from the function
+file_update_time and adds a no_wait_parameter. This is required to
+support async buffered writes.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/inode.c | 36 ++++++++++++++++++++++--------------
+ 1 file changed, 22 insertions(+), 14 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index cf660665ac70..bbd3a6092567 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2064,20 +2064,7 @@ int file_remove_privs(struct file *file)
+ }
+ EXPORT_SYMBOL(file_remove_privs);
+ 
+-/**
+- *	file_update_time	-	update mtime and ctime time
+- *	@file: file accessed
+- *
+- *	Update the mtime and ctime members of an inode and mark the inode
+- *	for writeback.  Note that this function is meant exclusively for
+- *	usage in the file write path of filesystems, and filesystems may
+- *	choose to explicitly ignore update via this function with the
+- *	S_NOCMTIME inode flag, e.g. for network filesystem where these
+- *	timestamps are handled by the server.  This can return an error for
+- *	file systems who need to allocate space in order to update an inode.
+- */
+-
+-int file_update_time(struct file *file)
++static int do_file_update_time(struct file *file, bool no_wait)
+ {
+ 	struct inode *inode = file_inode(file);
+ 	struct timespec64 now;
+@@ -2101,6 +2088,9 @@ int file_update_time(struct file *file)
+ 	if (!sync_it)
+ 		return 0;
+ 
++	if (no_wait)
++		return -EAGAIN;
++
+ 	/* Finally allowed to write? Takes lock. */
+ 	if (__mnt_want_write_file(file))
+ 		return 0;
+@@ -2110,6 +2100,24 @@ int file_update_time(struct file *file)
+ 
+ 	return ret;
+ }
++
++/**
++ *	file_update_time	-	update mtime and ctime time
++ *	@file: file accessed
++ *
++ *	Update the mtime and ctime members of an inode and mark the inode
++ *	for writeback.  Note that this function is meant exclusively for
++ *	usage in the file write path of filesystems, and filesystems may
++ *	choose to explicitly ignore update via this function with the
++ *	S_NOCMTIME inode flag, e.g. for network filesystem where these
++ *	timestamps are handled by the server.  This can return an error for
++ *	file systems who need to allocate space in order to update an inode.
++ */
++
++int file_update_time(struct file *file)
++{
++	return do_file_update_time(file, false);
++}
+ EXPORT_SYMBOL(file_update_time);
+ 
+ /* Caller must hold the file's inode lock */
+-- 
+2.30.2
+

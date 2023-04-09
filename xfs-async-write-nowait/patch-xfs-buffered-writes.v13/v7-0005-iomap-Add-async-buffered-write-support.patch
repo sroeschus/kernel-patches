@@ -1,0 +1,145 @@
+From 35117fad37b4701753fe6d6290ae1f21ebfa72e9 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 23 Mar 2022 15:05:40 -0700
+Subject: [PATCH v7 05/15] iomap: Add async buffered write support
+
+This adds async buffered write support to iomap.
+
+This replaces the call to balance_dirty_pages_ratelimited() with the
+call to balance_dirty_pages_ratelimited_flags. This allows to specify if
+the write request is async or not.
+
+In addition this also moves the above function call to the beginning of
+the function. If the function call is at the end of the function and the
+decision is made to throttle writes, then there is no request that
+io-uring can wait on. By moving it to the beginning of the function, the
+write request is not issued, but returns -EAGAIN instead. io-uring will
+punt the request and process it in the io-worker.
+
+By moving the function call to the beginning of the function, the write
+throttling will happen one page later.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Reviewed-by: Jan Kara <jack@suse.cz>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ fs/iomap/buffered-io.c | 33 ++++++++++++++++++++++++++++-----
+ 1 file changed, 28 insertions(+), 5 deletions(-)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 705f80cd2d4e..b06a5c24a4db 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -558,6 +558,7 @@ static int __iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 	loff_t block_size = i_blocksize(iter->inode);
+ 	loff_t block_start = round_down(pos, block_size);
+ 	loff_t block_end = round_up(pos + len, block_size);
++	unsigned int nr_blocks = i_blocks_per_folio(iter->inode, folio);
+ 	size_t from = offset_in_folio(folio, pos), to = from + len;
+ 	size_t poff, plen;
+ 
+@@ -566,6 +567,8 @@ static int __iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 	folio_clear_error(folio);
+ 
+ 	iop = iomap_page_create(iter->inode, folio, iter->flags);
++	if ((iter->flags & IOMAP_NOWAIT) && !iop && nr_blocks > 1)
++		return -EAGAIN;
+ 
+ 	do {
+ 		iomap_adjust_read_range(iter->inode, folio, &block_start,
+@@ -583,7 +586,12 @@ static int __iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 				return -EIO;
+ 			folio_zero_segments(folio, poff, from, to, poff + plen);
+ 		} else {
+-			int status = iomap_read_folio_sync(block_start, folio,
++			int status;
++
++			if (iter->flags & IOMAP_NOWAIT)
++				return -EAGAIN;
++
++			status = iomap_read_folio_sync(block_start, folio,
+ 					poff, plen, srcmap);
+ 			if (status)
+ 				return status;
+@@ -612,6 +620,9 @@ static int iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 	unsigned fgp = FGP_LOCK | FGP_WRITE | FGP_CREAT | FGP_STABLE | FGP_NOFS;
+ 	int status = 0;
+ 
++	if (iter->flags & IOMAP_NOWAIT)
++		fgp |= FGP_NOWAIT;
++
+ 	BUG_ON(pos + len > iter->iomap.offset + iter->iomap.length);
+ 	if (srcmap != &iter->iomap)
+ 		BUG_ON(pos + len > srcmap->offset + srcmap->length);
+@@ -631,7 +642,7 @@ static int iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 	folio = __filemap_get_folio(iter->inode->i_mapping, pos >> PAGE_SHIFT,
+ 			fgp, mapping_gfp_mask(iter->inode->i_mapping));
+ 	if (!folio) {
+-		status = -ENOMEM;
++		status = (iter->flags & IOMAP_NOWAIT) ? -EAGAIN : -ENOMEM;
+ 		goto out_no_page;
+ 	}
+ 	if (pos + len > folio_pos(folio) + folio_size(folio))
+@@ -749,6 +760,8 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 	loff_t pos = iter->pos;
+ 	ssize_t written = 0;
+ 	long status = 0;
++	struct address_space *mapping = iter->inode->i_mapping;
++	unsigned int bdp_flags = (iter->flags & IOMAP_NOWAIT) ? BDP_ASYNC : 0;
+ 
+ 	do {
+ 		struct folio *folio;
+@@ -761,6 +774,11 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		bytes = min_t(unsigned long, PAGE_SIZE - offset,
+ 						iov_iter_count(i));
+ again:
++		status = balance_dirty_pages_ratelimited_flags(mapping,
++							       bdp_flags);
++		if (unlikely(status))
++			break;
++
+ 		if (bytes > length)
+ 			bytes = length;
+ 
+@@ -769,6 +787,10 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		 * Otherwise there's a nasty deadlock on copying from the
+ 		 * same page as we're writing to, without it being marked
+ 		 * up-to-date.
++		 *
++		 * For async buffered writes the assumption is that the user
++		 * page has already been faulted in. This can be optimized by
++		 * faulting the user page.
+ 		 */
+ 		if (unlikely(fault_in_iov_iter_readable(i, bytes) == bytes)) {
+ 			status = -EFAULT;
+@@ -780,7 +802,7 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 			break;
+ 
+ 		page = folio_file_page(folio, pos >> PAGE_SHIFT);
+-		if (mapping_writably_mapped(iter->inode->i_mapping))
++		if (mapping_writably_mapped(mapping))
+ 			flush_dcache_page(page);
+ 
+ 		copied = copy_page_from_iter_atomic(page, offset, bytes, i);
+@@ -805,8 +827,6 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		pos += status;
+ 		written += status;
+ 		length -= status;
+-
+-		balance_dirty_pages_ratelimited(iter->inode->i_mapping);
+ 	} while (iov_iter_count(i) && length);
+ 
+ 	return written ? written : status;
+@@ -824,6 +844,9 @@ iomap_file_buffered_write(struct kiocb *iocb, struct iov_iter *i,
+ 	};
+ 	int ret;
+ 
++	if (iocb->ki_flags & IOCB_NOWAIT)
++		iter.flags |= IOMAP_NOWAIT;
++
+ 	while ((ret = iomap_iter(&iter, ops)) > 0)
+ 		iter.processed = iomap_write_iter(&iter, i);
+ 	if (iter.pos == iocb->ki_pos)
+-- 
+2.30.2
+

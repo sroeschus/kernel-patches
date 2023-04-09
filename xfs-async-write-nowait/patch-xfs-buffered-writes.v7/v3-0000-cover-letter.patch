@@ -1,0 +1,45 @@
+From 0aa161c54e9766260bbf138e15337206d81f77c5 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 28 Apr 2022 13:48:39 -0700
+Subject: [RFC PATCH v3 00/17] *** SUBJECT HERE ***
+
+*** BLURB HERE ***
+
+Stefan Roesch (17):
+  block: add check for async buffered writes to generic_write_checks
+  iomap: add iomap_page_create_gfp to allocate iomap_pages
+  iomap: use iomap_page_create_gfp() in __iomap_write_begin
+  iomap: add async buffered write support
+  xfs: add iomap async buffered write support
+  fs: split off need_remove_file_privs() do_remove_file_privs()
+  fs: split off need_file_update_time and do_file_update_time
+  fs: add pending file update time flag.
+  xfs: Enable async write file modification handling.
+  xfs: add async buffered write support
+  io_uring: add support for async buffered writes
+  io_uring: add tracepoint for short writes
+  sched: add new fields to task_struct
+  mm: support write throttling for async buffered writes
+  iomap: User throttling for async buffered writes.
+  io_uring: support write throttling for async buffered writes
+  xfs: enable async buffered write support
+
+ fs/inode.c                      | 146 ++++++++++++++++++++++----------
+ fs/io_uring.c                   | 131 +++++++++++++++++++++++++---
+ fs/iomap/buffered-io.c          |  63 ++++++++++++--
+ fs/read_write.c                 |   3 +-
+ fs/xfs/xfs_file.c               |  32 ++++---
+ fs/xfs/xfs_iomap.c              |  32 ++++++-
+ include/linux/fs.h              |   7 ++
+ include/linux/sched.h           |   3 +
+ include/linux/writeback.h       |   1 +
+ include/trace/events/io_uring.h |  25 ++++++
+ kernel/fork.c                   |   1 +
+ mm/page-writeback.c             |  54 ++++++++----
+ 12 files changed, 405 insertions(+), 93 deletions(-)
+
+
+base-commit: af2d861d4cd2a4da5137f795ee3509e6f944a25b
+-- 
+2.30.2
+

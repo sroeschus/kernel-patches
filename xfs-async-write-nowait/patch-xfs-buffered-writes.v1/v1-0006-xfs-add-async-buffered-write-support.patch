@@ -1,0 +1,40 @@
+From 5148a4edbbe9c8fb140b3632a2df6102bdf02f73 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:19:10 -0800
+Subject: [PATCH v1 06/12] xfs: add async buffered write support
+
+This adds the async buffered write support to XFS. For async
+buffered write requests, the request will return -EAGAIN if the
+ilock cannot be obtained immediately.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_file.c | 10 ++++++----
+ 1 file changed, 6 insertions(+), 4 deletions(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index 5bddb1e9e0b3..55208f7156db 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -702,12 +702,14 @@ xfs_file_buffered_write(
+ 	bool			cleared_space = false;
+ 	int			iolock;
+ 
+-	if (iocb->ki_flags & IOCB_NOWAIT)
+-		return -EOPNOTSUPP;
+-
+ write_retry:
+ 	iolock = XFS_IOLOCK_EXCL;
+-	xfs_ilock(ip, iolock);
++	if (iocb->ki_flags & IOCB_NOWAIT) {
++		if (!xfs_ilock_nowait(ip, iolock))
++			return -EAGAIN;
++	} else {
++		xfs_ilock(ip, iolock);
++	}
+ 
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+ 	if (ret)
+-- 
+2.30.2
+

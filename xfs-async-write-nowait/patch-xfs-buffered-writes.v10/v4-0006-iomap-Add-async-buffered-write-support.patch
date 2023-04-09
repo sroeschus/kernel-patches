@@ -1,0 +1,86 @@
+From f2d2439b966b9c85227c07ac0911afa2a2dae95a Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 23 Mar 2022 15:05:40 -0700
+Subject: [RFC PATCH v4 06/17] iomap: Add async buffered write support
+
+This adds async buffered write support to iomap.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/iomap/buffered-io.c | 23 ++++++++++++++++++++++-
+ 1 file changed, 22 insertions(+), 1 deletion(-)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 27e67bfc64f5..187f4ddd7ba7 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -555,15 +555,21 @@ static int __iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 	loff_t block_size = i_blocksize(iter->inode);
+ 	loff_t block_start = round_down(pos, block_size);
+ 	loff_t block_end = round_up(pos + len, block_size);
++	unsigned int nr_blocks = i_blocks_per_folio(iter->inode, folio);
+ 	size_t from = offset_in_folio(folio, pos), to = from + len;
+ 	size_t poff, plen;
+ 	gfp_t  gfp = GFP_NOFS | __GFP_NOFAIL;
+ 
++	if (iter->flags & IOMAP_NOWAIT)
++		gfp = GFP_NOWAIT;
++
+ 	if (folio_test_uptodate(folio))
+ 		return 0;
+ 	folio_clear_error(folio);
+ 
+ 	iop = iomap_page_create(iter->inode, folio, gfp);
++	if ((iter->flags & IOMAP_NOWAIT) && !iop && nr_blocks > 1)
++		return -EAGAIN;
+ 
+ 	do {
+ 		iomap_adjust_read_range(iter->inode, folio, &block_start,
+@@ -581,7 +587,12 @@ static int __iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 				return -EIO;
+ 			folio_zero_segments(folio, poff, from, to, poff + plen);
+ 		} else {
+-			int status = iomap_read_folio_sync(block_start, folio,
++			int status;
++
++			if (iter->flags & IOMAP_NOWAIT)
++				return -EAGAIN;
++
++			status = iomap_read_folio_sync(block_start, folio,
+ 					poff, plen, srcmap);
+ 			if (status)
+ 				return status;
+@@ -610,6 +621,9 @@ static int iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 	unsigned fgp = FGP_LOCK | FGP_WRITE | FGP_CREAT | FGP_STABLE | FGP_NOFS;
+ 	int status = 0;
+ 
++	if (iter->flags & IOMAP_NOWAIT)
++		fgp |= FGP_NOWAIT;
++
+ 	BUG_ON(pos + len > iter->iomap.offset + iter->iomap.length);
+ 	if (srcmap != &iter->iomap)
+ 		BUG_ON(pos + len > srcmap->offset + srcmap->length);
+@@ -767,6 +781,10 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		 * Otherwise there's a nasty deadlock on copying from the
+ 		 * same page as we're writing to, without it being marked
+ 		 * up-to-date.
++		 *
++		 * For async buffered writes the assumption is that the user
++		 * page has already been faulted in. This can be optimized by
++		 * faulting the user page in the prepare phase of io-uring.
+ 		 */
+ 		if (unlikely(fault_in_iov_iter_readable(i, bytes) == bytes)) {
+ 			status = -EFAULT;
+@@ -822,6 +840,9 @@ iomap_file_buffered_write(struct kiocb *iocb, struct iov_iter *i,
+ 	};
+ 	int ret;
+ 
++	if (iocb->ki_flags & IOCB_NOWAIT)
++		iter.flags |= IOMAP_NOWAIT;
++
+ 	while ((ret = iomap_iter(&iter, ops)) > 0)
+ 		iter.processed = iomap_write_iter(&iter, i);
+ 	if (iter.pos == iocb->ki_pos)
+-- 
+2.30.2
+

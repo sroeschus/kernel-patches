@@ -1,0 +1,118 @@
+From e594e454518e5405e3263a9b05965c23c0b6501b Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 25 Mar 2022 13:51:45 -0700
+Subject: [PATCH v9 10/14] fs: Add async write file modification handling.
+
+This adds a file_modified_async() function to return -EAGAIN if the
+request either requires to remove privileges or needs to update the file
+modification time. This is required for async buffered writes, so the
+request gets handled in the io worker of io-uring.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Reviewed-by: Jan Kara <jack@suse.cz>
+Reviewed-by: Christian Brauner (Microsoft) <brauner@kernel.org>
+---
+ fs/inode.c         | 45 ++++++++++++++++++++++++++++++++++++++++++---
+ include/linux/fs.h |  1 +
+ 2 files changed, 43 insertions(+), 3 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index ff726d99ecc7..259ebf438893 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2116,17 +2116,21 @@ int file_update_time(struct file *file)
+ EXPORT_SYMBOL(file_update_time);
+ 
+ /**
+- * file_modified - handle mandated vfs changes when modifying a file
++ * file_modified_flags - handle mandated vfs changes when modifying a file
+  * @file: file that was modified
++ * @flags: kiocb flags
+  *
+  * When file has been modified ensure that special
+  * file privileges are removed and time settings are updated.
+  *
++ * If IOCB_NOWAIT is set, special file privileges will not be removed and
++ * time settings will not be updated. It will return -EAGAIN.
++ *
+  * Context: Caller must hold the file's inode lock.
+  *
+  * Return: 0 on success, negative errno on failure.
+  */
+-int file_modified(struct file *file)
++static int file_modified_flags(struct file *file, int flags)
+ {
+ 	int ret;
+ 	struct inode *inode = file_inode(file);
+@@ -2136,7 +2140,7 @@ int file_modified(struct file *file)
+ 	 * Clear the security bits if the process is not being run by root.
+ 	 * This keeps people from modifying setuid and setgid binaries.
+ 	 */
+-	ret = __file_remove_privs(file, 0);
++	ret = __file_remove_privs(file, flags);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -2146,11 +2150,46 @@ int file_modified(struct file *file)
+ 	ret = inode_needs_update_time(inode, &now);
+ 	if (ret <= 0)
+ 		return ret;
++	if (flags & IOCB_NOWAIT)
++		return -EAGAIN;
+ 
+ 	return __file_update_time(file, &now, ret);
+ }
++
++/**
++ * file_modified - handle mandated vfs changes when modifying a file
++ * @file: file that was modified
++ *
++ * When file has been modified ensure that special
++ * file privileges are removed and time settings are updated.
++ *
++ * Context: Caller must hold the file's inode lock.
++ *
++ * Return: 0 on success, negative errno on failure.
++ */
++int file_modified(struct file *file)
++{
++	return file_modified_flags(file, 0);
++}
+ EXPORT_SYMBOL(file_modified);
+ 
++/**
++ * kiocb_modified - handle mandated vfs changes when modifying a file
++ * @iocb: iocb that was modified
++ *
++ * When file has been modified ensure that special
++ * file privileges are removed and time settings are updated.
++ *
++ * Context: Caller must hold the file's inode lock.
++ *
++ * Return: 0 on success, negative errno on failure.
++ */
++int kiocb_modified(struct kiocb *iocb)
++{
++	return file_modified_flags(iocb->ki_filp, iocb->ki_flags);
++}
++EXPORT_SYMBOL_GPL(kiocb_modified);
++
+ int inode_needs_sync(struct inode *inode)
+ {
+ 	if (IS_SYNC(inode))
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index bc84847c201e..c0d99b5a166b 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -2390,6 +2390,7 @@ static inline void file_accessed(struct file *file)
+ }
+ 
+ extern int file_modified(struct file *file);
++int kiocb_modified(struct kiocb *iocb);
+ 
+ int sync_inode_metadata(struct inode *inode, int wait);
+ 
+-- 
+2.30.2
+

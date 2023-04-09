@@ -1,0 +1,155 @@
+From d581e6f25d0eefb1c476cb943eca62fe984711ee Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 17 Mar 2022 09:54:00 -0700
+Subject: [RFC PATCH v3 14/16] fs: add no_wait parameter to file_modified()
+
+This adds the no_wait parameter to the file_modified function.
+This is required to be able to check in the file_update_time() function
+if the fast path can be used.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/cifs/cifsfs.c   | 2 +-
+ fs/ext4/file.c     | 4 ++--
+ fs/f2fs/file.c     | 2 +-
+ fs/fuse/file.c     | 2 +-
+ fs/inode.c         | 4 ++--
+ fs/remap_range.c   | 2 +-
+ fs/xfs/xfs_file.c  | 4 ++--
+ include/linux/fs.h | 2 +-
+ 8 files changed, 11 insertions(+), 11 deletions(-)
+
+diff --git a/fs/cifs/cifsfs.c b/fs/cifs/cifsfs.c
+index 082c21478686..1f7330de29a2 100644
+--- a/fs/cifs/cifsfs.c
++++ b/fs/cifs/cifsfs.c
+@@ -1221,7 +1221,7 @@ ssize_t cifs_file_copychunk_range(unsigned int xid,
+ 	/* should we flush first and last page first */
+ 	truncate_inode_pages(&target_inode->i_data, 0);
+ 
+-	rc = file_modified(dst_file);
++	rc = file_modified(dst_file, false);
+ 	if (!rc)
+ 		rc = target_tcon->ses->server->ops->copychunk_range(xid,
+ 			smb_file_src, smb_file_target, off, len, destoff);
+diff --git a/fs/ext4/file.c b/fs/ext4/file.c
+index 8cc11715518a..be6248a98018 100644
+--- a/fs/ext4/file.c
++++ b/fs/ext4/file.c
+@@ -244,7 +244,7 @@ static ssize_t ext4_write_checks(struct kiocb *iocb, struct iov_iter *from)
+ 	if (count <= 0)
+ 		return count;
+ 
+-	ret = file_modified(iocb->ki_filp);
++	ret = file_modified(iocb->ki_filp, false);
+ 	if (ret)
+ 		return ret;
+ 	return count;
+@@ -453,7 +453,7 @@ static ssize_t ext4_dio_write_checks(struct kiocb *iocb, struct iov_iter *from,
+ 		goto restart;
+ 	}
+ 
+-	ret = file_modified(file);
++	ret = file_modified(file, false);
+ 	if (ret < 0)
+ 		goto out;
+ 
+diff --git a/fs/f2fs/file.c b/fs/f2fs/file.c
+index 3c98ef6af97d..b86f52899a6d 100644
+--- a/fs/f2fs/file.c
++++ b/fs/f2fs/file.c
+@@ -4357,7 +4357,7 @@ static ssize_t f2fs_write_checks(struct kiocb *iocb, struct iov_iter *from)
+ 	if (count <= 0)
+ 		return count;
+ 
+-	err = file_modified(file);
++	err = file_modified(file, false);
+ 	if (err)
+ 		return err;
+ 	return count;
+diff --git a/fs/fuse/file.c b/fs/fuse/file.c
+index 0fc150c1c50b..240f88980ec9 100644
+--- a/fs/fuse/file.c
++++ b/fs/fuse/file.c
+@@ -3056,7 +3056,7 @@ static ssize_t __fuse_copy_file_range(struct file *file_in, loff_t pos_in,
+ 
+ 	inode_lock(inode_out);
+ 
+-	err = file_modified(file_out);
++	err = file_modified(file_out, false);
+ 	if (err)
+ 		goto out;
+ 
+diff --git a/fs/inode.c b/fs/inode.c
+index 28d26bc36219..b100457bd460 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2099,7 +2099,7 @@ int file_update_time(struct file *file)
+ EXPORT_SYMBOL(file_update_time);
+ 
+ /* Caller must hold the file's inode lock */
+-int file_modified(struct file *file)
++int file_modified(struct file *file, bool no_wait)
+ {
+ 	int err;
+ 
+@@ -2114,7 +2114,7 @@ int file_modified(struct file *file)
+ 	if (unlikely(file->f_mode & FMODE_NOCMTIME))
+ 		return 0;
+ 
+-	return file_update_time(file);
++	return do_file_update_time(file, no_wait);
+ }
+ EXPORT_SYMBOL(file_modified);
+ 
+diff --git a/fs/remap_range.c b/fs/remap_range.c
+index 231159682907..49fb7a22f3ba 100644
+--- a/fs/remap_range.c
++++ b/fs/remap_range.c
+@@ -348,7 +348,7 @@ int generic_remap_file_range_prep(struct file *file_in, loff_t pos_in,
+ 
+ 	/* If can't alter the file contents, we're done. */
+ 	if (!(remap_flags & REMAP_FILE_DEDUP))
+-		ret = file_modified(file_out);
++		ret = file_modified(file_out, false);
+ 
+ 	return ret;
+ }
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index 55208f7156db..c0e519e63a66 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -410,7 +410,7 @@ xfs_file_write_checks(
+ 		spin_unlock(&ip->i_flags_lock);
+ 
+ out:
+-	return file_modified(file);
++	return file_modified(file, iocb->ki_flags & IOCB_NOWAIT);
+ }
+ 
+ static int
+@@ -937,7 +937,7 @@ xfs_file_fallocate(
+ 			goto out_unlock;
+ 	}
+ 
+-	error = file_modified(file);
++	error = file_modified(file, false);
+ 	if (error)
+ 		goto out_unlock;
+ 
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index fb11e233582c..7c95ac64a7bd 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -2424,7 +2424,7 @@ static inline void file_accessed(struct file *file)
+ 		touch_atime(&file->f_path);
+ }
+ 
+-extern int file_modified(struct file *file);
++extern int file_modified(struct file *file, bool no_wait);
+ 
+ int sync_inode_metadata(struct inode *inode, int wait);
+ 
+-- 
+2.30.2
+

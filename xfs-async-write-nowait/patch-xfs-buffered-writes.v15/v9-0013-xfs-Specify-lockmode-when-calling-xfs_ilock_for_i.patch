@@ -1,0 +1,50 @@
+From 157c5e25ded77dc46d9d620aa5c37de3d39adcef Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:16:54 -0800
+Subject: [PATCH v9 13/14] xfs: Specify lockmode when calling
+ xfs_ilock_for_iomap()
+
+This patch changes the helper function xfs_ilock_for_iomap such that the
+lock mode must be passed in.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+Reviewed-by: Darrick J. Wong <djwong@kernel.org>
+---
+ fs/xfs/xfs_iomap.c | 6 +++---
+ 1 file changed, 3 insertions(+), 3 deletions(-)
+
+diff --git a/fs/xfs/xfs_iomap.c b/fs/xfs/xfs_iomap.c
+index 5a393259a3a3..bcf7c3694290 100644
+--- a/fs/xfs/xfs_iomap.c
++++ b/fs/xfs/xfs_iomap.c
+@@ -664,7 +664,7 @@ xfs_ilock_for_iomap(
+ 	unsigned		flags,
+ 	unsigned		*lockmode)
+ {
+-	unsigned		mode = XFS_ILOCK_SHARED;
++	unsigned int		mode = *lockmode;
+ 	bool			is_write = flags & (IOMAP_WRITE | IOMAP_ZERO);
+ 
+ 	/*
+@@ -742,7 +742,7 @@ xfs_direct_write_iomap_begin(
+ 	int			nimaps = 1, error = 0;
+ 	bool			shared = false;
+ 	u16			iomap_flags = 0;
+-	unsigned		lockmode;
++	unsigned int		lockmode = XFS_ILOCK_SHARED;
+ 
+ 	ASSERT(flags & (IOMAP_WRITE | IOMAP_ZERO));
+ 
+@@ -1172,7 +1172,7 @@ xfs_read_iomap_begin(
+ 	xfs_fileoff_t		end_fsb = xfs_iomap_end_fsb(mp, offset, length);
+ 	int			nimaps = 1, error = 0;
+ 	bool			shared = false;
+-	unsigned		lockmode;
++	unsigned int		lockmode = XFS_ILOCK_SHARED;
+ 
+ 	ASSERT(!(flags & (IOMAP_WRITE | IOMAP_ZERO)));
+ 
+-- 
+2.30.2
+

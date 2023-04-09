@@ -1,0 +1,47 @@
+From 9425b1425a3034a173c6f0addd61e75d23a2f568 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 11 Jan 2022 11:30:54 -0800
+Subject: [RFC PATCH v4 01/17] block: add check for async buffered writes to
+ generic_write_checks
+
+This introduces the flag FMODE_BUF_WASYNC. If devices support async
+buffered writes, this flag can be set. It also modifies the check in
+generic_write_checks to take async buffered writes into consideration.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/read_write.c    | 3 ++-
+ include/linux/fs.h | 3 +++
+ 2 files changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/fs/read_write.c b/fs/read_write.c
+index 0074afa7ecb3..8d45bc6176c5 100644
+--- a/fs/read_write.c
++++ b/fs/read_write.c
+@@ -1641,7 +1641,8 @@ ssize_t generic_write_checks(struct kiocb *iocb, struct iov_iter *from)
+ 	if (iocb->ki_flags & IOCB_APPEND)
+ 		iocb->ki_pos = i_size_read(inode);
+ 
+-	if ((iocb->ki_flags & IOCB_NOWAIT) && !(iocb->ki_flags & IOCB_DIRECT))
++	if ((iocb->ki_flags & IOCB_NOWAIT) &&
++	    !((iocb->ki_flags & IOCB_DIRECT) || (file->f_mode & FMODE_BUF_WASYNC)))
+ 		return -EINVAL;
+ 
+ 	count = iov_iter_count(from);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index e2d892b201b0..fb11e233582c 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -176,6 +176,9 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
+ /* File supports async buffered reads */
+ #define FMODE_BUF_RASYNC	((__force fmode_t)0x40000000)
+ 
++/* File supports async nowait buffered writes */
++#define FMODE_BUF_WASYNC	((__force fmode_t)0x80000000)
++
+ /*
+  * Attribute flags.  These should be or-ed together to figure out what
+  * has been changed!
+-- 
+2.30.2
+

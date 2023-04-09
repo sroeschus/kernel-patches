@@ -1,0 +1,71 @@
+From 57b23ba2e480de28a09abf305cb0d229d948f7e3 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.cz>
+Date: Wed, 18 May 2022 12:02:33 +0200
+Subject: [RFC PATCH v3 14/18] mm: Prepare balance_dirty_pages() for async
+ buffered writes
+
+If balance_dirty_pages() gets called for async buffered write, we don't
+want to wait. Instead we need to indicate to the caller that throttling
+is needed so that it can stop writing and offload the rest of the write
+to a context that can block.
+
+Signed-off-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ mm/page-writeback.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 89dcc7d8395a..fc3b79acd90b 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1545,8 +1545,8 @@ static inline void wb_dirty_limits(struct dirty_throttle_control *dtc)
+  * If we're over `background_thresh' then the writeback threads are woken to
+  * perform some writeout.
+  */
+-static void balance_dirty_pages(struct bdi_writeback *wb,
+-				unsigned long pages_dirtied)
++static int balance_dirty_pages(struct bdi_writeback *wb,
++			       unsigned long pages_dirtied, bool nowait)
+ {
+ 	struct dirty_throttle_control gdtc_stor = { GDTC_INIT(wb) };
+ 	struct dirty_throttle_control mdtc_stor = { MDTC_INIT(wb, &gdtc_stor) };
+@@ -1566,6 +1566,7 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 	struct backing_dev_info *bdi = wb->bdi;
+ 	bool strictlimit = bdi->capabilities & BDI_CAP_STRICTLIMIT;
+ 	unsigned long start_time = jiffies;
++	int ret = 0;
+ 
+ 	for (;;) {
+ 		unsigned long now = jiffies;
+@@ -1794,6 +1795,10 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 					  period,
+ 					  pause,
+ 					  start_time);
++		if (nowait) {
++			ret = -EAGAIN;
++			break;
++		}
+ 		__set_current_state(TASK_KILLABLE);
+ 		wb->dirty_sleep = now;
+ 		io_schedule_timeout(pause);
+@@ -1825,6 +1830,7 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 		if (fatal_signal_pending(current))
+ 			break;
+ 	}
++	return ret;
+ }
+ 
+ static DEFINE_PER_CPU(int, bdp_ratelimits);
+@@ -1906,7 +1912,7 @@ void balance_dirty_pages_ratelimited(struct address_space *mapping)
+ 	preempt_enable();
+ 
+ 	if (unlikely(current->nr_dirtied >= ratelimit))
+-		balance_dirty_pages(wb, current->nr_dirtied);
++		balance_dirty_pages(wb, current->nr_dirtied, false);
+ 
+ 	wb_put(wb);
+ }
+-- 
+2.30.2
+

@@ -1,0 +1,52 @@
+From 6a8f59ce2d26581aff6b002090b5aff7b4671170 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 13:38:03 -0800
+Subject: [PATCH v1 00/19] *** SUBJECT HERE ***
+
+*** BLURB HERE ***
+
+Stefan Roesch (19):
+  fs: Add flags parameter to __block_write_begin_int
+  mm: Introduce do_generic_perform_write
+  mm: Add support for async buffered writes
+  fs: split off __alloc_page_buffers function
+  fs: split off __create_empty_buffers function
+  fs: Add gfp_t parameter to create_page_buffers()
+  fs: add support for async buffered writes
+  io_uring: add support for async buffered writes
+  io_uring: Add tracepoint for short writes
+  sched: add new fields to task_struct
+  mm: support write throttling for async buffered writes
+  io_uring: support write throttling for async buffered writes
+  block: enable async buffered writes for block devices.
+  mm: Add FGP_ATOMIC flag to __filemap_get_folio()
+  iomap: add iomap_page_create_gfp to allocate iomap_pages
+  iomap: add async buffered write support
+  xfs: add iomap async buffered write support
+  xfs: add async buffered write support
+  xfs: enable async buffered write support
+
+ block/fops.c                    |   5 +-
+ fs/buffer.c                     |  98 +++++++++++++++---------
+ fs/internal.h                   |   3 +-
+ fs/io_uring.c                   | 130 +++++++++++++++++++++++++++++---
+ fs/iomap/buffered-io.c          |  63 +++++++++++++++-
+ fs/read_write.c                 |   3 +-
+ fs/xfs/xfs_file.c               |  12 +--
+ fs/xfs/xfs_iomap.c              |  33 +++++++-
+ include/linux/fs.h              |   4 +
+ include/linux/pagemap.h         |   1 +
+ include/linux/sched.h           |   3 +
+ include/linux/writeback.h       |   1 +
+ include/trace/events/io_uring.h |  25 ++++++
+ kernel/fork.c                   |   1 +
+ mm/filemap.c                    |  27 +++++--
+ mm/folio-compat.c               |  12 ++-
+ mm/page-writeback.c             |  54 +++++++++----
+ 17 files changed, 390 insertions(+), 85 deletions(-)
+
+
+base-commit: 7e57714cd0ad2d5bb90e50b5096a0e671dec1ef3
+-- 
+2.30.2
+

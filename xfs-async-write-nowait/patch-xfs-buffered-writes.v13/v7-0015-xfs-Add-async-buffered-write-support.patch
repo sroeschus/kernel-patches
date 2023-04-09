@@ -1,0 +1,80 @@
+From 560435ffbfcb58ea9e6ead4b6aa9bed82ddb325d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 24 May 2022 09:53:23 -0700
+Subject: [PATCH v7 15/15] xfs: Add async buffered write support
+
+This adds the async buffered write support to XFS. For async buffered
+write requests, the request will return -EAGAIN if the ilock cannot be
+obtained immediately.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Reviewed-by: Christoph Hellwig <hch@lst.de>
+---
+ fs/xfs/xfs_file.c  | 11 +++++------
+ fs/xfs/xfs_iomap.c |  5 ++++-
+ 2 files changed, 9 insertions(+), 7 deletions(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index a60632ecc3f0..4d65ff007c7d 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -410,7 +410,7 @@ xfs_file_write_checks(
+ 		spin_unlock(&ip->i_flags_lock);
+ 
+ out:
+-	return file_modified(file);
++	return kiocb_modified(iocb);
+ }
+ 
+ static int
+@@ -700,12 +700,11 @@ xfs_file_buffered_write(
+ 	bool			cleared_space = false;
+ 	unsigned int		iolock;
+ 
+-	if (iocb->ki_flags & IOCB_NOWAIT)
+-		return -EOPNOTSUPP;
+-
+ write_retry:
+ 	iolock = XFS_IOLOCK_EXCL;
+-	xfs_ilock(ip, iolock);
++	ret = xfs_ilock_iocb(iocb, iolock);
++	if (ret)
++		return ret;
+ 
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+ 	if (ret)
+@@ -1165,7 +1164,7 @@ xfs_file_open(
+ {
+ 	if (xfs_is_shutdown(XFS_M(inode->i_sb)))
+ 		return -EIO;
+-	file->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC;
++	file->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC | FMODE_BUF_WASYNC;
+ 	return generic_file_open(inode, file);
+ }
+ 
+diff --git a/fs/xfs/xfs_iomap.c b/fs/xfs/xfs_iomap.c
+index bcf7c3694290..5d50fed291b4 100644
+--- a/fs/xfs/xfs_iomap.c
++++ b/fs/xfs/xfs_iomap.c
+@@ -886,6 +886,7 @@ xfs_buffered_write_iomap_begin(
+ 	bool			eof = false, cow_eof = false, shared = false;
+ 	int			allocfork = XFS_DATA_FORK;
+ 	int			error = 0;
++	unsigned int		lockmode = XFS_ILOCK_EXCL;
+ 
+ 	if (xfs_is_shutdown(mp))
+ 		return -EIO;
+@@ -897,7 +898,9 @@ xfs_buffered_write_iomap_begin(
+ 
+ 	ASSERT(!XFS_IS_REALTIME_INODE(ip));
+ 
+-	xfs_ilock(ip, XFS_ILOCK_EXCL);
++	error = xfs_ilock_for_iomap(ip, flags, &lockmode);
++	if (error)
++		return error;
+ 
+ 	if (XFS_IS_CORRUPT(mp, !xfs_ifork_has_extents(&ip->i_df)) ||
+ 	    XFS_TEST_ERROR(false, mp, XFS_ERRTAG_BMAPIFORMAT)) {
+-- 
+2.30.2
+

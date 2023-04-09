@@ -1,0 +1,50 @@
+From 05dea4d7f026f67bf550c003346d52c16c9c3481 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:08:46 -0800
+Subject: [RFC PATCH v1 02/18] mm: add FGP_ATOMIC flag to __filemap_get_folio()
+
+Define FGP_ATOMIC flag and add support for the new flag in the function
+__filemap_get_folio().
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ include/linux/pagemap.h | 1 +
+ mm/filemap.c            | 3 +++
+ 2 files changed, 4 insertions(+)
+
+diff --git a/include/linux/pagemap.h b/include/linux/pagemap.h
+index 993994cd943a..b8d839e10780 100644
+--- a/include/linux/pagemap.h
++++ b/include/linux/pagemap.h
+@@ -509,6 +509,7 @@ pgoff_t page_cache_prev_miss(struct address_space *mapping,
+ #define FGP_HEAD		0x00000080
+ #define FGP_ENTRY		0x00000100
+ #define FGP_STABLE		0x00000200
++#define FGP_ATOMIC		0x00000400
+ 
+ struct folio *__filemap_get_folio(struct address_space *mapping, pgoff_t index,
+ 		int fgp_flags, gfp_t gfp);
+diff --git a/mm/filemap.c b/mm/filemap.c
+index 9a1eef6c5d35..dd3c5682276e 100644
+--- a/mm/filemap.c
++++ b/mm/filemap.c
+@@ -1929,6 +1929,7 @@ static void *mapping_get_entry(struct address_space *mapping, pgoff_t index)
+  * * %FGP_NOFS - __GFP_FS will get cleared in gfp.
+  * * %FGP_NOWAIT - Don't get blocked by page lock.
+  * * %FGP_STABLE - Wait for the folio to be stable (finished writeback)
++ * * %FGP_ATOMIC - Use atomic allocations
+  *
+  * If %FGP_LOCK or %FGP_CREAT are specified then the function may sleep even
+  * if the %GFP flags specified for %FGP_CREAT are atomic.
+@@ -1988,6 +1989,8 @@ struct folio *__filemap_get_folio(struct address_space *mapping, pgoff_t index,
+ 			gfp |= __GFP_WRITE;
+ 		if (fgp_flags & FGP_NOFS)
+ 			gfp &= ~__GFP_FS;
++		if (fgp_flags & FGP_ATOMIC)
++			gfp |= GFP_ATOMIC;
+ 
+ 		folio = filemap_alloc_folio(gfp, 0);
+ 		if (!folio)
+-- 
+2.30.2
+

@@ -1,0 +1,34 @@
+From adba634d6418b5bc68ba2beb08560b565768bd19 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 31 May 2022 11:02:48 -0700
+Subject: [PATCH v9 06/14] iomap: Return -EAGAIN from iomap_write_iter()
+
+If iomap_write_iter() encounters -EAGAIN, return -EAGAIN to the caller.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/iomap/buffered-io.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 83cf093fcb92..f2e36240079f 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -830,7 +830,13 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		length -= status;
+ 	} while (iov_iter_count(i) && length);
+ 
+-	return written ? written : status;
++	if (status == -EAGAIN) {
++		iov_iter_revert(i, written);
++		return -EAGAIN;
++	}
++	if (written)
++		return written;
++	return status;
+ }
+ 
+ ssize_t
+-- 
+2.30.2
+

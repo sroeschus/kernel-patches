@@ -1,0 +1,47 @@
+From e029d3fb89cc301e804b161f0a95a5f7c949ec6d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 28 Jan 2022 15:06:19 -0800
+Subject: [PATCH v2 09/13] sched: add new fields to task_struct
+
+Add two new fields to the task_struct to support async
+write throttling.
+
+  - One field to store how long writes are throttled: bdp_pause
+  - The other field to store the number of dirtied pages:
+    bdp_nr_dirtied_pause
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ include/linux/sched.h | 3 +++
+ kernel/fork.c         | 1 +
+ 2 files changed, 4 insertions(+)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+index 75ba8aa60248..97146b7539c5 100644
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1324,6 +1324,9 @@ struct task_struct {
+ 	/* Start of a write-and-pause period: */
+ 	unsigned long			dirty_paused_when;
+ 
++	unsigned long			bdp_pause;
++	int				bdp_nr_dirtied_pause;
++
+ #ifdef CONFIG_LATENCYTOP
+ 	int				latency_record_count;
+ 	struct latency_record		latency_record[LT_SAVECOUNT];
+diff --git a/kernel/fork.c b/kernel/fork.c
+index f1e89007f228..1bf05bc354d0 100644
+--- a/kernel/fork.c
++++ b/kernel/fork.c
+@@ -2246,6 +2246,7 @@ static __latent_entropy struct task_struct *copy_process(
+ 	p->nr_dirtied = 0;
+ 	p->nr_dirtied_pause = 128 >> (PAGE_SHIFT - 10);
+ 	p->dirty_paused_when = 0;
++	p->bdp_nr_dirtied_pause = -1;
+ 
+ 	p->pdeath_signal = 0;
+ 	INIT_LIST_HEAD(&p->thread_group);
+-- 
+2.30.2
+

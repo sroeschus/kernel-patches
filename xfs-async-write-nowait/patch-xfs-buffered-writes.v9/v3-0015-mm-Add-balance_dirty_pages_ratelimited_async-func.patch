@@ -1,0 +1,129 @@
+From c07e7e6571e938fc407e6bce44bee9aca24cc134 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 12 May 2022 09:07:44 -0700
+Subject: [RFC PATCH v3 15/18] mm: Add balance_dirty_pages_ratelimited_async()
+ function
+
+This adds the helper function balance_dirty_pages_ratelimited_flags().
+It adds the parameter no_wait to balance_dirty_pages_ratelimited().
+For async buffered writes no_wait will be true.
+A new function called balance_dirty_pages_ratelimited_async() is
+introduced that calls balance_dirty_pages_ratelimited_flags with no_wait
+set to true.
+If write throttling is enabled, it retuns -EAGAIN, so the write request
+can be punted to the io-uring worker.
+
+For non-async writes the current behavior is maintained.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ include/linux/writeback.h |  1 +
+ mm/page-writeback.c       | 60 +++++++++++++++++++++++++++++----------
+ 2 files changed, 46 insertions(+), 15 deletions(-)
+
+diff --git a/include/linux/writeback.h b/include/linux/writeback.h
+index fec248ab1fec..15eb0242d3ef 100644
+--- a/include/linux/writeback.h
++++ b/include/linux/writeback.h
+@@ -373,6 +373,7 @@ unsigned long wb_calc_thresh(struct bdi_writeback *wb, unsigned long thresh);
+ 
+ void wb_update_bandwidth(struct bdi_writeback *wb);
+ void balance_dirty_pages_ratelimited(struct address_space *mapping);
++int  balance_dirty_pages_ratelimited_async(struct address_space *mapping);
+ bool wb_over_bg_thresh(struct bdi_writeback *wb);
+ 
+ typedef int (*writepage_t)(struct page *page, struct writeback_control *wbc,
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index fc3b79acd90b..d6a67fc07c55 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1851,28 +1851,18 @@ static DEFINE_PER_CPU(int, bdp_ratelimits);
+  */
+ DEFINE_PER_CPU(int, dirty_throttle_leaks) = 0;
+ 
+-/**
+- * balance_dirty_pages_ratelimited - balance dirty memory state
+- * @mapping: address_space which was dirtied
+- *
+- * Processes which are dirtying memory should call in here once for each page
+- * which was newly dirtied.  The function will periodically check the system's
+- * dirty state and will initiate writeback if needed.
+- *
+- * Once we're over the dirty memory limit we decrease the ratelimiting
+- * by a lot, to prevent individual processes from overshooting the limit
+- * by (ratelimit_pages) each.
+- */
+-void balance_dirty_pages_ratelimited(struct address_space *mapping)
++static int balance_dirty_pages_ratelimited_flags(struct address_space *mapping,
++						bool no_wait)
+ {
+ 	struct inode *inode = mapping->host;
+ 	struct backing_dev_info *bdi = inode_to_bdi(inode);
+ 	struct bdi_writeback *wb = NULL;
+ 	int ratelimit;
++	int ret = 0;
+ 	int *p;
+ 
+ 	if (!(bdi->capabilities & BDI_CAP_WRITEBACK))
+-		return;
++		return ret;
+ 
+ 	if (inode_cgwb_enabled(inode))
+ 		wb = wb_get_create_current(bdi, GFP_KERNEL);
+@@ -1912,12 +1902,52 @@ void balance_dirty_pages_ratelimited(struct address_space *mapping)
+ 	preempt_enable();
+ 
+ 	if (unlikely(current->nr_dirtied >= ratelimit))
+-		balance_dirty_pages(wb, current->nr_dirtied, false);
++		balance_dirty_pages(wb, current->nr_dirtied, no_wait);
+ 
+ 	wb_put(wb);
++	return ret;
++}
++
++/**
++ * balance_dirty_pages_ratelimited - balance dirty memory state
++ * @mapping: address_space which was dirtied
++ *
++ * Processes which are dirtying memory should call in here once for each page
++ * which was newly dirtied.  The function will periodically check the system's
++ * dirty state and will initiate writeback if needed.
++ *
++ * Once we're over the dirty memory limit we decrease the ratelimiting
++ * by a lot, to prevent individual processes from overshooting the limit
++ * by (ratelimit_pages) each.
++ */
++void balance_dirty_pages_ratelimited(struct address_space *mapping)
++{
++	balance_dirty_pages_ratelimited_flags(mapping, false);
+ }
+ EXPORT_SYMBOL(balance_dirty_pages_ratelimited);
+ 
++/**
++ * balance_dirty_pages_ratelimited_async - balance dirty memory state
++ * @mapping: address_space which was dirtied
++ *
++ * Processes which are dirtying memory should call in here once for each page
++ * which was newly dirtied.  The function will periodically check the system's
++ * dirty state and will initiate writeback if needed.
++ *
++ * Once we're over the dirty memory limit we decrease the ratelimiting
++ * by a lot, to prevent individual processes from overshooting the limit
++ * by (ratelimit_pages) each.
++ *
++ * This is the async version of the API. It only checks if it is required to
++ * balance dirty pages. In case it needs to balance dirty pages, it returns
++ * -EAGAIN.
++ */
++int  balance_dirty_pages_ratelimited_async(struct address_space *mapping)
++{
++	return balance_dirty_pages_ratelimited_flags(mapping, true);
++}
++EXPORT_SYMBOL(balance_dirty_pages_ratelimited_async);
++
+ /**
+  * wb_over_bg_thresh - does @wb need to be written back?
+  * @wb: bdi_writeback of interest
+-- 
+2.30.2
+

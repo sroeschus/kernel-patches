@@ -1,0 +1,124 @@
+From 2d38120c73751121ae69698a5ac1cc6d5538d04b Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:19:10 -0800
+Subject: [RFC PATCH v3 10/18] xfs: Add async buffered write support
+
+This adds the async buffered write support to XFS. For async buffered
+write requests, the request will return -EAGAIN if the ilock cannot be
+obtained immediately.
+
+This splits off a new helper xfs_ilock_inode from the existing helper
+xfs_ilock_iocb so it can be used for this function. The exising helper
+cannot be used as it hardcoded the inode to be used.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_file.c | 32 +++++++++++++++-----------------
+ 1 file changed, 15 insertions(+), 17 deletions(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index 793918c83755..ad3175b7d366 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -190,14 +190,13 @@ xfs_file_fsync(
+ 	return error;
+ }
+ 
+-static int
+-xfs_ilock_iocb(
+-	struct kiocb		*iocb,
++static inline int
++xfs_ilock_xfs_inode(
++	struct xfs_inode	*ip,
++	int			flags,
+ 	unsigned int		lock_mode)
+ {
+-	struct xfs_inode	*ip = XFS_I(file_inode(iocb->ki_filp));
+-
+-	if (iocb->ki_flags & IOCB_NOWAIT) {
++	if (flags & IOCB_NOWAIT) {
+ 		if (!xfs_ilock_nowait(ip, lock_mode))
+ 			return -EAGAIN;
+ 	} else {
+@@ -222,7 +221,7 @@ xfs_file_dio_read(
+ 
+ 	file_accessed(iocb->ki_filp);
+ 
+-	ret = xfs_ilock_iocb(iocb, XFS_IOLOCK_SHARED);
++	ret = xfs_ilock_xfs_inode(ip, iocb->ki_flags, XFS_IOLOCK_SHARED);
+ 	if (ret)
+ 		return ret;
+ 	ret = iomap_dio_rw(iocb, to, &xfs_read_iomap_ops, NULL, 0, 0);
+@@ -244,7 +243,7 @@ xfs_file_dax_read(
+ 	if (!iov_iter_count(to))
+ 		return 0; /* skip atime */
+ 
+-	ret = xfs_ilock_iocb(iocb, XFS_IOLOCK_SHARED);
++	ret = xfs_ilock_xfs_inode(ip, iocb->ki_flags, XFS_IOLOCK_SHARED);
+ 	if (ret)
+ 		return ret;
+ 	ret = dax_iomap_rw(iocb, to, &xfs_read_iomap_ops);
+@@ -264,7 +263,7 @@ xfs_file_buffered_read(
+ 
+ 	trace_xfs_file_buffered_read(iocb, to);
+ 
+-	ret = xfs_ilock_iocb(iocb, XFS_IOLOCK_SHARED);
++	ret = xfs_ilock_xfs_inode(ip, iocb->ki_flags, XFS_IOLOCK_SHARED);
+ 	if (ret)
+ 		return ret;
+ 	ret = generic_file_read_iter(iocb, to);
+@@ -343,7 +342,7 @@ xfs_file_write_checks(
+ 	if (*iolock == XFS_IOLOCK_SHARED && !IS_NOSEC(inode)) {
+ 		xfs_iunlock(ip, *iolock);
+ 		*iolock = XFS_IOLOCK_EXCL;
+-		error = xfs_ilock_iocb(iocb, *iolock);
++		error = xfs_ilock_xfs_inode(ip, iocb->ki_flags, *iolock);
+ 		if (error) {
+ 			*iolock = 0;
+ 			return error;
+@@ -516,7 +515,7 @@ xfs_file_dio_write_aligned(
+ 	int			iolock = XFS_IOLOCK_SHARED;
+ 	ssize_t			ret;
+ 
+-	ret = xfs_ilock_iocb(iocb, iolock);
++	ret = xfs_ilock_xfs_inode(ip, iocb->ki_flags, iolock);
+ 	if (ret)
+ 		return ret;
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+@@ -583,7 +582,7 @@ xfs_file_dio_write_unaligned(
+ 		flags = IOMAP_DIO_FORCE_WAIT;
+ 	}
+ 
+-	ret = xfs_ilock_iocb(iocb, iolock);
++	ret = xfs_ilock_xfs_inode(ip, iocb->ki_flags, iolock);
+ 	if (ret)
+ 		return ret;
+ 
+@@ -659,7 +658,7 @@ xfs_file_dax_write(
+ 	ssize_t			ret, error = 0;
+ 	loff_t			pos;
+ 
+-	ret = xfs_ilock_iocb(iocb, iolock);
++	ret = xfs_ilock_xfs_inode(ip, iocb->ki_flags, iolock);
+ 	if (ret)
+ 		return ret;
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+@@ -702,12 +701,11 @@ xfs_file_buffered_write(
+ 	bool			cleared_space = false;
+ 	int			iolock;
+ 
+-	if (iocb->ki_flags & IOCB_NOWAIT)
+-		return -EOPNOTSUPP;
+-
+ write_retry:
+ 	iolock = XFS_IOLOCK_EXCL;
+-	xfs_ilock(ip, iolock);
++	ret = xfs_ilock_xfs_inode(ip, iocb->ki_flags, iolock);
++	if (ret)
++		return ret;
+ 
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+ 	if (ret)
+-- 
+2.30.2
+

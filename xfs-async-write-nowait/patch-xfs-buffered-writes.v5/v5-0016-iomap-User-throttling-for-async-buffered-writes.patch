@@ -1,0 +1,30 @@
+From 89fdbe33e5d0bdd3877b14671587822856c41d84 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 9 Mar 2022 10:27:34 -0800
+Subject: [RFC PATCH v5 16/18] iomap: User throttling for async buffered
+ writes.
+
+This enables throttling for async buffered writes.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/iomap/buffered-io.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 9b54a1a151b0..198c81f8dd64 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -854,7 +854,8 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		written += status;
+ 		length -= status;
+ 
+-		balance_dirty_pages_ratelimited(iter->inode->i_mapping);
++		balance_dirty_pages_ratelimited_flags(iter->inode->i_mapping,
++						(iter->flags & IOMAP_NOWAIT));
+ 	} while (iov_iter_count(i) && length);
+ 
+ 	return written ? written : status;
+-- 
+2.30.2
+

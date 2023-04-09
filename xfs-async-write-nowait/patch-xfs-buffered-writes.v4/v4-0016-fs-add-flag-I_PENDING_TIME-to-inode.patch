@@ -1,0 +1,65 @@
+From 5e5ce5ee899af6ef629c8198833fbd3a34452131 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 17 Mar 2022 14:22:09 -0700
+Subject: [RFC PATCH v4 16/17] fs: add flag I_PENDING_TIME to inode
+
+This adds the I_PENDING_TIME to the inode flags. It is set for
+asynchronous buffered writes when the inode time needs to get
+updated. In flight write requests for the same inode do not need
+to update the inode mtime as long as this flag is not cleared.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/inode.c         | 8 +++++++-
+ include/linux/fs.h | 2 ++
+ 2 files changed, 9 insertions(+), 1 deletion(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index fd77711bc702..3fb008102115 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2088,14 +2088,20 @@ static int do_file_update_time(struct file *file, bool no_wait)
+ 	if (!sync_it)
+ 		return 0;
+ 
+-	if (no_wait)
++	if (no_wait) {
++		if (IS_PENDING_TIME(inode))
++			return 0;
++
++		inode->i_flags |= S_PENDING_TIME;
+ 		return -EAGAIN;
++	}
+ 
+ 	/* Finally allowed to write? Takes lock. */
+ 	if (__mnt_want_write_file(file))
+ 		return 0;
+ 
+ 	ret = inode_update_time(inode, &now, sync_it);
++	inode->i_flags &= ~S_PENDING_TIME;
+ 	__mnt_drop_write_file(file);
+ 
+ 	return ret;
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 7c95ac64a7bd..716217f6898a 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -2165,6 +2165,7 @@ struct super_operations {
+ #define S_CASEFOLD	(1 << 15) /* Casefolded file */
+ #define S_VERITY	(1 << 16) /* Verity file (using fs/verity/) */
+ #define S_KERNEL_FILE	(1 << 17) /* File is in use by the kernel (eg. fs/cachefiles) */
++#define S_PENDING_TIME	(1 << 18) /* File update time is pending */
+ 
+ /*
+  * Note that nosuid etc flags are inode-specific: setting some file-system
+@@ -2207,6 +2208,7 @@ static inline bool sb_rdonly(const struct super_block *sb) { return sb->s_flags
+ #define IS_ENCRYPTED(inode)	((inode)->i_flags & S_ENCRYPTED)
+ #define IS_CASEFOLDED(inode)	((inode)->i_flags & S_CASEFOLD)
+ #define IS_VERITY(inode)	((inode)->i_flags & S_VERITY)
++#define IS_PENDING_TIME(inode)	((inode)->i_flags & S_PENDING_TIME)
+ 
+ #define IS_WHITEOUT(inode)	(S_ISCHR(inode->i_mode) && \
+ 				 (inode)->i_rdev == WHITEOUT_DEV)
+-- 
+2.30.2
+

@@ -1,0 +1,138 @@
+From 103e341614a7963880236a7987a74728fcbc032f Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 9 Mar 2022 14:11:11 -0800
+Subject: [PATCH v2 00/13] io-uring/xfs: support async buffered writes
+
+This patch series adds support for async buffered writes when using both
+xfs io-uring. Currently io-uring only supports buffered writes in the slow
+path, by processing them in the io workers. With this patch series it is
+now possible to support buffered writes in the fast path. To be able to use
+the fast path the required pages must be in the page cache or they can be
+loaded with noio, the required locks in xfs can be granted immediately and
+no additional blocks need to be read form disk.
+
+Support for async buffered writes:
+
+  Patch 1: block: add check for async buffered writes to generic_write_checks
+    Add a new flag FMODE_BUF_WASYNC so filesystems can specify that they support
+    async buffered writes and include the flag in the check of the function
+    generic_write_checks().
+    
+  Patch 2: mm: add FGP_ATOMIC flag to __filemap_get_folio()
+    This adds the FGP_ATOMIC flag. This allows to specify the gfp flags
+    for memory allocations for async buffered writes.
+    
+  Patch 3: iomap: add iomap_page_create_gfp to allocate iomap_pages
+    Add new function to allow specifying gfp flags when allocating and
+    initializing the structure iomap_page.
+
+  Patch 4: iomap: add async buffered write support
+    Set IOMAP_NOWAIT flag if IOCB_NOWAIT is set. Also use specific gfp flags if
+    the iomap_page structure is allocated for an async buffered page.
+
+  Patch 5: xfs: add iomap async buffered write support
+    Add async buffered write support to the xfs iomap layer.
+
+  Patch 6: xfs: add async buffered write support
+    Take the ilock in nowait mode if async buffered writes are enabled.
+
+  Patch 7: io_uring: add support for async buffered writes
+    This enables the async buffered writes optimization in io_uring.
+    Buffered writes are enabled for blocks that are already in the page
+    cache.
+
+  Patch 8: io_uring: Add tracepoint for short writes
+
+Support for write throttling of async buffered writes:
+
+  Patch 9: sched: add new fields to task_struct
+    Add two new fields to the task_struct. These fields store the
+    deadline after which writes are no longer throttled.
+
+  Patch 10: mm: support write throttling for async buffered writes
+    This changes the balance_dirty_pages function to take an additional
+    parameter. When nowait is specified the write throttling code no
+    longer waits synchronously for the deadline to expire. Instead
+    it sets the fields in task_struct. Once the deadline expires the
+    fields are reset.
+    
+  Patch 11: iomap: User throttling for async buffered writes.
+    Enable async buffered write throttling in iomap.
+
+  Patch 12: io_uring: support write throttling for async buffered writes
+    Adds support to io_uring for write throttling. When the writes
+    are throttled, the write requests are added to the pending io list.
+    Once the write throttling deadline expires, the writes are submitted.
+    
+Enable async buffered write support in xfs
+  Patch 13: xfs: enable async buffered write support
+    This enables the flag that enables async buffered writes for xfs.
+
+
+Testing:
+  This patch has been tested with xfstests and fio.
+
+
+Performance results:
+  For fio the following results have been obtained with a queue depth of
+  1 and 4k block size (runtime 600 secs):
+
+                 sequential writes:
+                 without patch                 with patch
+  iops:              80k                          269k
+
+
+                 random writes:
+                 without patch                 with patch
+  iops:              76k                          249k
+
+For an io depth of 1, the new patch improves throughput by over three 
+times and also the latency is considerably reduced. To achieve the same
+or better performance with the exisiting code an io depth of 4 is required.
+Increasing the iodepth further does not lead to any improvements.
+
+Especially for mixed workloads this is a considerable improvement.
+
+
+Changes:
+- V2: - Modified statement based on review comments in patch 1
+      - Modified comment in patch 4
+      - Pushed iomap throttling into its own patch (patch 11)
+
+
+
+Stefan Roesch (13):
+  block: add check for async buffered writes to generic_write_checks
+  mm: add FGP_ATOMIC flag to __filemap_get_folio()
+  iomap: add iomap_page_create_gfp to allocate iomap_pages
+  iomap: add async buffered write support
+  xfs: add iomap async buffered write support
+  xfs: add async buffered write support
+  io_uring: add support for async buffered writes
+  io_uring: add tracepoint for short writes
+  sched: add new fields to task_struct
+  mm: support write throttling for async buffered writes
+  iomap: User throttling for async buffered writes.
+  io_uring: support write throttling for async buffered writes
+  xfs: enable async buffered write support
+
+ fs/io_uring.c                   | 130 +++++++++++++++++++++++++++++---
+ fs/iomap/buffered-io.c          |  64 ++++++++++++++--
+ fs/read_write.c                 |   3 +-
+ fs/xfs/xfs_file.c               |  12 +--
+ fs/xfs/xfs_iomap.c              |  33 +++++++-
+ include/linux/fs.h              |   3 +
+ include/linux/pagemap.h         |   1 +
+ include/linux/sched.h           |   3 +
+ include/linux/writeback.h       |   1 +
+ include/trace/events/io_uring.h |  25 ++++++
+ kernel/fork.c                   |   1 +
+ mm/filemap.c                    |   4 +
+ mm/page-writeback.c             |  54 +++++++++----
+ 13 files changed, 291 insertions(+), 43 deletions(-)
+
+
+base-commit: ffb217a13a2eaf6d5bd974fc83036a53ca69f1e2
+-- 
+2.30.2
+

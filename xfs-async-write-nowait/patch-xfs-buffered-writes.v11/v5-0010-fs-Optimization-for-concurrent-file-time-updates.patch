@@ -1,0 +1,68 @@
+From 60966e10d7f1afb41b57a9502fee5910709d56e0 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 25 Mar 2022 13:48:49 -0700
+Subject: [PATCH v5 10/16] fs: Optimization for concurrent file time updates.
+
+This introduces the S_PENDING_TIME flag. If an async buffered write
+needs to update the time, it cannot be processed in the fast path of
+io-uring. When a time update is pending this flag is set for async
+buffered writes. Other concurrent async buffered writes for the same
+file do not need to wait while this time update is pending.
+
+This reduces the number of async buffered writes that need to get punted
+to the io-workers in io-uring.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/inode.c         | 11 +++++++++--
+ include/linux/fs.h |  3 +++
+ 2 files changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index 4503bed063e7..7185d860d423 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2150,10 +2150,17 @@ static int file_modified_flags(struct file *file, int flags)
+ 	ret = inode_needs_update_time(inode, &now);
+ 	if (ret <= 0)
+ 		return ret;
+-	if (flags & IOCB_NOWAIT)
++	if (flags & IOCB_NOWAIT) {
++		if (IS_PENDING_TIME(inode))
++			return 0;
++
++		inode_set_flags(inode, S_PENDING_TIME, S_PENDING_TIME);
+ 		return -EAGAIN;
++	}
+ 
+-	return __file_update_time(file, &now, ret);
++	ret = __file_update_time(file, &now, ret);
++	inode_set_flags(inode, 0, S_PENDING_TIME);
++	return ret;
+ }
+ 
+ /**
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index 2d9b3afcb4a5..5924c90eab1d 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -2143,6 +2143,8 @@ struct super_operations {
+ #define S_CASEFOLD	(1 << 15) /* Casefolded file */
+ #define S_VERITY	(1 << 16) /* Verity file (using fs/verity/) */
+ #define S_KERNEL_FILE	(1 << 17) /* File is in use by the kernel (eg. fs/cachefiles) */
++#define S_PENDING_TIME (1 << 18) /* File update time is pending */
++
+ 
+ /*
+  * Note that nosuid etc flags are inode-specific: setting some file-system
+@@ -2185,6 +2187,7 @@ static inline bool sb_rdonly(const struct super_block *sb) { return sb->s_flags
+ #define IS_ENCRYPTED(inode)	((inode)->i_flags & S_ENCRYPTED)
+ #define IS_CASEFOLDED(inode)	((inode)->i_flags & S_CASEFOLD)
+ #define IS_VERITY(inode)	((inode)->i_flags & S_VERITY)
++#define IS_PENDING_TIME(inode) ((inode)->i_flags & S_PENDING_TIME)
+ 
+ #define IS_WHITEOUT(inode)	(S_ISCHR(inode->i_mode) && \
+ 				 (inode)->i_rdev == WHITEOUT_DEV)
+-- 
+2.30.2
+

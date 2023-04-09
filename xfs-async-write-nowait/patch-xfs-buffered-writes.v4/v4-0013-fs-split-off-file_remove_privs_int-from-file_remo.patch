@@ -1,0 +1,106 @@
+From 9cad1063613c31684c5fc29db848bf12863246ee Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 22 Mar 2022 08:49:50 -0700
+Subject: [RFC PATCH v4 13/17] fs: split off file_remove_privs_int() from
+ file_remove_privs()
+
+This splits off the function file_remove_privs_int() from the function
+file_remove_privs() to support the no_wait parameter. If the file is
+using suid or sguid the fast path cannot be used.
+
+In addition the function is split in two function: the check function
+and the function to remove the privs.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/inode.c | 54 ++++++++++++++++++++++++++++++++++++++----------------
+ 1 file changed, 38 insertions(+), 16 deletions(-)
+
+diff --git a/fs/inode.c b/fs/inode.c
+index 63324df6fa27..cf660665ac70 100644
+--- a/fs/inode.c
++++ b/fs/inode.c
+@@ -2010,17 +2010,8 @@ static int __remove_privs(struct user_namespace *mnt_userns,
+ 	return notify_change(mnt_userns, dentry, &newattrs, NULL);
+ }
+ 
+-/*
+- * Remove special file priviledges (suid, capabilities) when file is written
+- * to or truncated.
+- */
+-int file_remove_privs(struct file *file)
++static int need_file_remove_privs(struct inode *inode, struct dentry *dentry, bool no_wait)
+ {
+-	struct dentry *dentry = file_dentry(file);
+-	struct inode *inode = file_inode(file);
+-	int kill;
+-	int error = 0;
+-
+ 	/*
+ 	 * Fast path for nothing security related.
+ 	 * As well for non-regular files, e.g. blkdev inodes.
+@@ -2030,16 +2021,47 @@ int file_remove_privs(struct file *file)
+ 	if (IS_NOSEC(inode) || !S_ISREG(inode->i_mode))
+ 		return 0;
+ 
+-	kill = dentry_needs_remove_privs(dentry);
+-	if (kill < 0)
+-		return kill;
+-	if (kill)
+-		error = __remove_privs(file_mnt_user_ns(file), dentry, kill);
++	if (no_wait) {
++		pr_warn("file_modified: need to remove security bits\n");
++		return -EAGAIN;
++	}
++
++	return dentry_needs_remove_privs(dentry);
++}
++
++static int do_file_remove_privs(struct file *file, struct inode *inode,
++				struct dentry *dentry, int kill)
++{
++	int error = 0;
++
++	error = __remove_privs(file_mnt_user_ns(file), dentry, kill);
+ 	if (!error)
+ 		inode_has_no_xattr(inode);
+ 
+ 	return error;
+ }
++
++static int file_remove_privs_int(struct file *file, bool no_wait)
++{
++	struct dentry *dentry = file_dentry(file);
++	struct inode *inode = file_inode(file);
++	int kill;
++
++	kill = need_file_remove_privs(inode, dentry, false);
++	if (kill <= 0)
++		return kill;
++
++	return do_file_remove_privs(file, inode, dentry, kill);
++}
++
++/*
++ * Remove special file privileges (suid, capabilities) when file is written
++ * to or truncated.
++ */
++int file_remove_privs(struct file *file)
++{
++	return file_remove_privs_int(file, false);
++}
+ EXPORT_SYMBOL(file_remove_privs);
+ 
+ /**
+@@ -2099,7 +2121,7 @@ int file_modified(struct file *file)
+ 	 * Clear the security bits if the process is not being run by root.
+ 	 * This keeps people from modifying setuid and setgid binaries.
+ 	 */
+-	err = file_remove_privs(file);
++	err = file_remove_privs_int(file, no_wait);
+ 	if (err)
+ 		return err;
+ 
+-- 
+2.30.2
+

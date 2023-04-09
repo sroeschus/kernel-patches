@@ -1,0 +1,87 @@
+From 7e42031633a24595399900dfade18d7f6695fb5f Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.cz>
+Date: Wed, 18 May 2022 12:02:33 +0200
+Subject: [RFC PATCH v4 03/17] mm: Prepare balance_dirty_pages() for async
+ buffered writes
+
+If balance_dirty_pages() gets called for async buffered write, we don't
+want to wait. Instead we need to indicate to the caller that throttling
+is needed so that it can stop writing and offload the rest of the write
+to a context that can block.
+
+Signed-off-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ include/linux/writeback.h |  4 ++++
+ mm/page-writeback.c       | 12 +++++++++---
+ 2 files changed, 13 insertions(+), 3 deletions(-)
+
+diff --git a/include/linux/writeback.h b/include/linux/writeback.h
+index fec248ab1fec..a9114c5090e9 100644
+--- a/include/linux/writeback.h
++++ b/include/linux/writeback.h
+@@ -372,6 +372,10 @@ void global_dirty_limits(unsigned long *pbackground, unsigned long *pdirty);
+ unsigned long wb_calc_thresh(struct bdi_writeback *wb, unsigned long thresh);
+ 
+ void wb_update_bandwidth(struct bdi_writeback *wb);
++
++/* Invoke balance dirty pages in async mode. */
++#define BDP_ASYNC 0x0001
++
+ void balance_dirty_pages_ratelimited(struct address_space *mapping);
+ bool wb_over_bg_thresh(struct bdi_writeback *wb);
+ 
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 89dcc7d8395a..7a320fd2ad33 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1545,8 +1545,8 @@ static inline void wb_dirty_limits(struct dirty_throttle_control *dtc)
+  * If we're over `background_thresh' then the writeback threads are woken to
+  * perform some writeout.
+  */
+-static void balance_dirty_pages(struct bdi_writeback *wb,
+-				unsigned long pages_dirtied)
++static int balance_dirty_pages(struct bdi_writeback *wb,
++			       unsigned long pages_dirtied, unsigned int flags)
+ {
+ 	struct dirty_throttle_control gdtc_stor = { GDTC_INIT(wb) };
+ 	struct dirty_throttle_control mdtc_stor = { MDTC_INIT(wb, &gdtc_stor) };
+@@ -1566,6 +1566,7 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 	struct backing_dev_info *bdi = wb->bdi;
+ 	bool strictlimit = bdi->capabilities & BDI_CAP_STRICTLIMIT;
+ 	unsigned long start_time = jiffies;
++	int ret = 0;
+ 
+ 	for (;;) {
+ 		unsigned long now = jiffies;
+@@ -1794,6 +1795,10 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 					  period,
+ 					  pause,
+ 					  start_time);
++		if (flags & BDP_ASYNC) {
++			ret = -EAGAIN;
++			break;
++		}
+ 		__set_current_state(TASK_KILLABLE);
+ 		wb->dirty_sleep = now;
+ 		io_schedule_timeout(pause);
+@@ -1825,6 +1830,7 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 		if (fatal_signal_pending(current))
+ 			break;
+ 	}
++	return ret;
+ }
+ 
+ static DEFINE_PER_CPU(int, bdp_ratelimits);
+@@ -1906,7 +1912,7 @@ void balance_dirty_pages_ratelimited(struct address_space *mapping)
+ 	preempt_enable();
+ 
+ 	if (unlikely(current->nr_dirtied >= ratelimit))
+-		balance_dirty_pages(wb, current->nr_dirtied);
++		balance_dirty_pages(wb, current->nr_dirtied, 0);
+ 
+ 	wb_put(wb);
+ }
+-- 
+2.30.2
+

@@ -1,0 +1,71 @@
+From 42bdfa41e33f643bcc9ae8120b3421afacd8a273 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 11 Jan 2022 11:30:54 -0800
+Subject: [PATCH v1 13/19] block: enable async buffered writes for block
+ devices.
+
+This introduces the flag FMODE_BUF_WASYNC. If devices support async
+buffered writes, this flag can be set. It also enables async buffered
+writes for block devices.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ block/fops.c       | 5 +----
+ fs/read_write.c    | 3 ++-
+ include/linux/fs.h | 3 +++
+ 3 files changed, 6 insertions(+), 5 deletions(-)
+
+diff --git a/block/fops.c b/block/fops.c
+index a18e7fbd97b8..20f9174ee21b 100644
+--- a/block/fops.c
++++ b/block/fops.c
+@@ -491,7 +491,7 @@ static int blkdev_open(struct inode *inode, struct file *filp)
+ 	 * during an unstable branch.
+ 	 */
+ 	filp->f_flags |= O_LARGEFILE;
+-	filp->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC;
++	filp->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC | FMODE_BUF_WASYNC;
+ 
+ 	if (filp->f_flags & O_NDELAY)
+ 		filp->f_mode |= FMODE_NDELAY;
+@@ -546,9 +546,6 @@ static ssize_t blkdev_write_iter(struct kiocb *iocb, struct iov_iter *from)
+ 	if (iocb->ki_pos >= size)
+ 		return -ENOSPC;
+ 
+-	if ((iocb->ki_flags & (IOCB_NOWAIT | IOCB_DIRECT)) == IOCB_NOWAIT)
+-		return -EOPNOTSUPP;
+-
+ 	size -= iocb->ki_pos;
+ 	if (iov_iter_count(from) > size) {
+ 		shorted = iov_iter_count(from) - size;
+diff --git a/fs/read_write.c b/fs/read_write.c
+index 0074afa7ecb3..58233844a9d8 100644
+--- a/fs/read_write.c
++++ b/fs/read_write.c
+@@ -1641,7 +1641,8 @@ ssize_t generic_write_checks(struct kiocb *iocb, struct iov_iter *from)
+ 	if (iocb->ki_flags & IOCB_APPEND)
+ 		iocb->ki_pos = i_size_read(inode);
+ 
+-	if ((iocb->ki_flags & IOCB_NOWAIT) && !(iocb->ki_flags & IOCB_DIRECT))
++	if ((iocb->ki_flags & IOCB_NOWAIT) &&
++		(!(iocb->ki_flags & IOCB_DIRECT) && !(file->f_mode & FMODE_BUF_WASYNC)))
+ 		return -EINVAL;
+ 
+ 	count = iov_iter_count(from);
+diff --git a/include/linux/fs.h b/include/linux/fs.h
+index b7dd5bd701c0..a526de71b932 100644
+--- a/include/linux/fs.h
++++ b/include/linux/fs.h
+@@ -176,6 +176,9 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
+ /* File supports async buffered reads */
+ #define FMODE_BUF_RASYNC	((__force fmode_t)0x40000000)
+ 
++/* File supports async nowait buffered writes */
++#define FMODE_BUF_WASYNC	((__force fmode_t)0x80000000)
++
+ /*
+  * Attribute flags.  These should be or-ed together to figure out what
+  * has been changed!
+-- 
+2.30.2
+

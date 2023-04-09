@@ -1,0 +1,68 @@
+From 4a5a990f564356caa0fac41ed199e94f231e11eb Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 11 Jan 2022 11:33:40 -0800
+Subject: [PATCH v2 08/13] io_uring: add tracepoint for short writes
+
+This adds the io_uring_short_write tracepoint to io_uring. A short write
+is issued if not all pages that are required for a write are in the page
+cache and the async buffered writes have to return EAGAIN.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/io_uring.c                   |  3 +++
+ include/trace/events/io_uring.h | 25 +++++++++++++++++++++++++
+ 2 files changed, 28 insertions(+)
+
+diff --git a/fs/io_uring.c b/fs/io_uring.c
+index 4357aeef38fb..6809d0fa5609 100644
+--- a/fs/io_uring.c
++++ b/fs/io_uring.c
+@@ -3836,6 +3836,9 @@ static int io_write(struct io_kiocb *req, unsigned int issue_flags)
+ 		if (ret2 != req->result && ret2 >= 0 && need_complete_io(req)) {
+ 			struct io_async_rw *rw;
+ 
++			trace_io_uring_short_write(req->ctx, kiocb->ki_pos - ret2,
++						req->result, ret2);
++
+ 			/* This is a partial write. The file pos has already been
+ 			 * updated, setup the async struct to complete the request
+ 			 * in the worker. Also update bytes_done to account for
+diff --git a/include/trace/events/io_uring.h b/include/trace/events/io_uring.h
+index 7346f0164cf4..ce1cfdf4b015 100644
+--- a/include/trace/events/io_uring.h
++++ b/include/trace/events/io_uring.h
+@@ -558,6 +558,31 @@ TRACE_EVENT(io_uring_req_failed,
+ 		  (unsigned long long) __entry->pad2, __entry->error)
+ );
+ 
++TRACE_EVENT(io_uring_short_write,
++
++	TP_PROTO(void *ctx, u64 fpos, u64 wanted, u64 got),
++
++	TP_ARGS(ctx, fpos, wanted, got),
++
++	TP_STRUCT__entry(
++		__field(void *,	ctx)
++		__field(u64,	fpos)
++		__field(u64,	wanted)
++		__field(u64,	got)
++	),
++
++	TP_fast_assign(
++		__entry->ctx	= ctx;
++		__entry->fpos	= fpos;
++		__entry->wanted	= wanted;
++		__entry->got	= got;
++	),
++
++	TP_printk("ring %p, fpos %lld, wanted %lld, got %lld",
++			  __entry->ctx, __entry->fpos,
++			  __entry->wanted, __entry->got)
++);
++
+ #endif /* _TRACE_IO_URING_H */
+ 
+ /* This part must be outside protection */
+-- 
+2.30.2
+

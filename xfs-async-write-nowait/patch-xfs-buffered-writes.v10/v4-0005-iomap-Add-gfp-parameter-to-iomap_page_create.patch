@@ -1,0 +1,93 @@
+From 827ece613edd085a54c1175ecc4a5a34c8d49cc0 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:11:34 -0800
+Subject: [RFC PATCH v4 05/17] iomap: Add gfp parameter to iomap_page_create()
+
+Add the gfp flags parameter to the function iomap_page_create() to be
+able to specify gfp flags.
+
+No intended functional changes in this patch.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/iomap/buffered-io.c | 19 ++++++++++++-------
+ 1 file changed, 12 insertions(+), 7 deletions(-)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 8ce8720093b9..27e67bfc64f5 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -44,7 +44,7 @@ static inline struct iomap_page *to_iomap_page(struct folio *folio)
+ static struct bio_set iomap_ioend_bioset;
+ 
+ static struct iomap_page *
+-iomap_page_create(struct inode *inode, struct folio *folio)
++iomap_page_create(struct inode *inode, struct folio *folio, gfp_t gfp)
+ {
+ 	struct iomap_page *iop = to_iomap_page(folio);
+ 	unsigned int nr_blocks = i_blocks_per_folio(inode, folio);
+@@ -52,8 +52,8 @@ iomap_page_create(struct inode *inode, struct folio *folio)
+ 	if (iop || nr_blocks <= 1)
+ 		return iop;
+ 
+-	iop = kzalloc(struct_size(iop, uptodate, BITS_TO_LONGS(nr_blocks)),
+-			GFP_NOFS | __GFP_NOFAIL);
++	iop = kzalloc(struct_size(iop, uptodate, BITS_TO_LONGS(nr_blocks)), gfp);
++
+ 	spin_lock_init(&iop->uptodate_lock);
+ 	if (folio_test_uptodate(folio))
+ 		bitmap_fill(iop->uptodate, nr_blocks);
+@@ -226,7 +226,8 @@ static int iomap_read_inline_data(const struct iomap_iter *iter,
+ 	if (WARN_ON_ONCE(size > iomap->length))
+ 		return -EIO;
+ 	if (offset > 0)
+-		iop = iomap_page_create(iter->inode, folio);
++		iop = iomap_page_create(iter->inode, folio,
++					GFP_NOFS | __GFP_NOFAIL);
+ 	else
+ 		iop = to_iomap_page(folio);
+ 
+@@ -264,7 +265,7 @@ static loff_t iomap_readpage_iter(const struct iomap_iter *iter,
+ 		return iomap_read_inline_data(iter, folio);
+ 
+ 	/* zero post-eof blocks as the page may be mapped */
+-	iop = iomap_page_create(iter->inode, folio);
++	iop = iomap_page_create(iter->inode, folio, GFP_NOFS | __GFP_NOFAIL);
+ 	iomap_adjust_read_range(iter->inode, folio, &pos, length, &poff, &plen);
+ 	if (plen == 0)
+ 		goto done;
+@@ -550,17 +551,20 @@ static int __iomap_write_begin(const struct iomap_iter *iter, loff_t pos,
+ 		size_t len, struct folio *folio)
+ {
+ 	const struct iomap *srcmap = iomap_iter_srcmap(iter);
+-	struct iomap_page *iop = iomap_page_create(iter->inode, folio);
++	struct iomap_page *iop = to_iomap_page(folio);
+ 	loff_t block_size = i_blocksize(iter->inode);
+ 	loff_t block_start = round_down(pos, block_size);
+ 	loff_t block_end = round_up(pos + len, block_size);
+ 	size_t from = offset_in_folio(folio, pos), to = from + len;
+ 	size_t poff, plen;
++	gfp_t  gfp = GFP_NOFS | __GFP_NOFAIL;
+ 
+ 	if (folio_test_uptodate(folio))
+ 		return 0;
+ 	folio_clear_error(folio);
+ 
++	iop = iomap_page_create(iter->inode, folio, gfp);
++
+ 	do {
+ 		iomap_adjust_read_range(iter->inode, folio, &block_start,
+ 				block_end - block_start, &poff, &plen);
+@@ -1332,7 +1336,8 @@ iomap_writepage_map(struct iomap_writepage_ctx *wpc,
+ 		struct writeback_control *wbc, struct inode *inode,
+ 		struct folio *folio, u64 end_pos)
+ {
+-	struct iomap_page *iop = iomap_page_create(inode, folio);
++	struct iomap_page *iop = iomap_page_create(inode, folio,
++						GFP_NOFS | __GFP_NOFAIL);
+ 	struct iomap_ioend *ioend, *next;
+ 	unsigned len = i_blocksize(inode);
+ 	unsigned nblocks = i_blocks_per_folio(inode, folio);
+-- 
+2.30.2
+

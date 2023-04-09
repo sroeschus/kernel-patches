@@ -1,0 +1,28 @@
+From a818adcdb4b10b905977586acd5e9ea9281ae44c Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:21:31 -0800
+Subject: [RFC PATCH v3 16/16] xfs: enable async buffered write support
+
+This turns on the async buffered write support for XFS.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_file.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index c0e519e63a66..e846cc7a449d 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -1173,7 +1173,7 @@ xfs_file_open(
+ 		return -EFBIG;
+ 	if (xfs_is_shutdown(XFS_M(inode->i_sb)))
+ 		return -EIO;
+-	file->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC;
++	file->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC | FMODE_BUF_WASYNC;
+ 	return 0;
+ }
+ 
+-- 
+2.30.2
+

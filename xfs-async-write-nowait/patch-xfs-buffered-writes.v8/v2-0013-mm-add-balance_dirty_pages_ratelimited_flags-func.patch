@@ -1,0 +1,115 @@
+From d8c103646155a702e7567d19e85167a7113e391c Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 12 May 2022 09:07:44 -0700
+Subject: [RFC PATCH v2 13/16] mm: add balance_dirty_pages_ratelimited_flags()
+ function
+
+This adds the function balance_dirty_pages_ratelimited_flags(). It adds
+the parameter is_async to balance_dirty_pages_ratelimited(). In case
+this is an async write, it will call _balance_diirty_pages() to
+determine if write throttling needs to be enabled. If write throttling
+is enabled, it retuns -EAGAIN, so the write request can be punted to
+the io-uring worker.
+
+The new function is changed to return the sleep time, so callers can
+observe if the write has been punted.
+
+For non-async writes the current behavior is maintained.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ include/linux/writeback.h |  1 +
+ mm/page-writeback.c       | 48 ++++++++++++++++++++++++++-------------
+ 2 files changed, 33 insertions(+), 16 deletions(-)
+
+diff --git a/include/linux/writeback.h b/include/linux/writeback.h
+index fec248ab1fec..d589804bb3be 100644
+--- a/include/linux/writeback.h
++++ b/include/linux/writeback.h
+@@ -373,6 +373,7 @@ unsigned long wb_calc_thresh(struct bdi_writeback *wb, unsigned long thresh);
+ 
+ void wb_update_bandwidth(struct bdi_writeback *wb);
+ void balance_dirty_pages_ratelimited(struct address_space *mapping);
++int  balance_dirty_pages_ratelimited_flags(struct address_space *mapping, bool is_async);
+ bool wb_over_bg_thresh(struct bdi_writeback *wb);
+ 
+ typedef int (*writepage_t)(struct page *page, struct writeback_control *wbc,
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index cbb74c0666c6..78f1326f3f20 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1877,28 +1877,17 @@ static DEFINE_PER_CPU(int, bdp_ratelimits);
+  */
+ DEFINE_PER_CPU(int, dirty_throttle_leaks) = 0;
+ 
+-/**
+- * balance_dirty_pages_ratelimited - balance dirty memory state
+- * @mapping: address_space which was dirtied
+- *
+- * Processes which are dirtying memory should call in here once for each page
+- * which was newly dirtied.  The function will periodically check the system's
+- * dirty state and will initiate writeback if needed.
+- *
+- * Once we're over the dirty memory limit we decrease the ratelimiting
+- * by a lot, to prevent individual processes from overshooting the limit
+- * by (ratelimit_pages) each.
+- */
+-void balance_dirty_pages_ratelimited(struct address_space *mapping)
++int balance_dirty_pages_ratelimited_flags(struct address_space *mapping, bool is_async)
+ {
+ 	struct inode *inode = mapping->host;
+ 	struct backing_dev_info *bdi = inode_to_bdi(inode);
+ 	struct bdi_writeback *wb = NULL;
+ 	int ratelimit;
++	int ret = 0;
+ 	int *p;
+ 
+ 	if (!(bdi->capabilities & BDI_CAP_WRITEBACK))
+-		return;
++		return ret;
+ 
+ 	if (inode_cgwb_enabled(inode))
+ 		wb = wb_get_create_current(bdi, GFP_KERNEL);
+@@ -1937,10 +1926,37 @@ void balance_dirty_pages_ratelimited(struct address_space *mapping)
+ 	}
+ 	preempt_enable();
+ 
+-	if (unlikely(current->nr_dirtied >= ratelimit))
+-		balance_dirty_pages(wb, current->nr_dirtied);
++	if (unlikely(current->nr_dirtied >= ratelimit)) {
++		if (is_async) {
++			struct bdp_ctx ctx = { BDP_CTX_INIT(ctx, wb) };
++
++			ret = _balance_dirty_pages(wb, current->nr_dirtied, &ctx);
++			if (ret)
++				ret = -EAGAIN;
++		} else {
++			balance_dirty_pages(wb, current->nr_dirtied);
++		}
++	}
+ 
+ 	wb_put(wb);
++	return ret;
++}
++
++/**
++ * balance_dirty_pages_ratelimited - balance dirty memory state
++ * @mapping: address_space which was dirtied
++ *
++ * Processes which are dirtying memory should call in here once for each page
++ * which was newly dirtied.  The function will periodically check the system's
++ * dirty state and will initiate writeback if needed.
++ *
++ * Once we're over the dirty memory limit we decrease the ratelimiting
++ * by a lot, to prevent individual processes from overshooting the limit
++ * by (ratelimit_pages) each.
++ */
++void balance_dirty_pages_ratelimited(struct address_space *mapping)
++{
++	balance_dirty_pages_ratelimited_flags(mapping, false);
+ }
+ EXPORT_SYMBOL(balance_dirty_pages_ratelimited);
+ 
+-- 
+2.30.2
+

@@ -1,0 +1,178 @@
+From dbb01133a6f620cee2e919c495ef4c0b203cf54b Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 25 Mar 2022 14:54:15 -0700
+Subject: [RFC PATCH v5 00/18] io-uring/xfs: support async buffered writes
+
+This patch series adds support for async buffered writes when using both
+xfs io-uring. Currently io-uring only supports buffered writes in the slow
+path, by processing them in the io workers. With this patch series it is
+now possible to support buffered writes in the fast path. To be able to use
+the fast path the required pages must be in the page cache. The required locks
+in xfs can be granted immediately and no additional blocks need to be read
+form disk.
+
+Open issues:
+- Updating the modified time of the inode takes time.
+  Updating the inode can take time. Patch 15 implements an
+  improvement for that. However for 300 write requests only 120 are
+  able to take the fast path.
+  
+- Updating the modified time of the inode blocks other requests.
+  Updating the last modified time of the inode keeps the inode locked
+  in exclusive mode. This has the side effect that new requests cannot
+  get the inode lock in no_wait and therefore get punted to the io worker.
+
+Alternative 1:
+  Don't implement any special case for the above updating of the modified time
+  and let it proceed in the fast path.
+
+  Potentially pass down no_wait information to function xfs_vn_update_time() and
+  get ilock in nowait there. We still wouldn't get the allocations atomic, but
+  most of the allocations use a cache.
+
+Alternative 2:
+  Increase the granularity how often the modification time is updated.
+
+
+Support for async buffered writes:
+
+  Patch 1: block: add check for async buffered writes to generic_write_checks
+    Add a new flag FMODE_BUF_WASYNC so filesystems can specify that they support
+    async buffered writes and include the flag in the check of the function
+    generic_write_checks().
+    
+  Patch 2: mm: add FGP_ATOMIC flag to __filemap_get_folio()
+    This adds the FGP_ATOMIC flag. This allows to specify the gfp flags
+    for memory allocations for async buffered writes.
+    
+  Patch 3: iomap: add iomap_page_create_gfp to allocate iomap_pages
+    Add new function to allow specifying gfp flags when allocating and
+    initializing the structure iomap_page.
+
+  Patch 4: iomap: use iomap_page_create_gfp() in __iomap_write_begin
+    Add a gfp flag to the iomap_page_create function.
+  
+  Patch 5: iomap: add async buffered write support
+    Set IOMAP_NOWAIT flag if IOCB_NOWAIT is set. Also use specific gfp flags if
+    the iomap_page structure is allocated for an async buffered page.
+
+  Patch 6: iomap: add async buffered write support
+    Add async buffered write support to the xfs iomap layer.
+
+Support for async buffered write support and inode time modification
+
+
+  Patch 7: fs: split off need_remove_file_privs() do_remove_file_privs()
+    Splits of a check and action function, so they can later be invoked
+    in the nowait code path.
+    
+  Patch 8: fs: split off need_file_update_time and do_file_update_time
+    Splits of a check and action function, so they can later be invoked
+    in the nowait code path.
+    
+  Patch 9: fs: add pending file update time flag.
+    Add new flag so consecutive write requests for the same inode can
+    proceed without waiting for the inode modification time to complete.
+
+  Patch 10: xfs: Enable async write file modification handling.
+    Enable async write handling in xfs for the file modification time
+    update. If the file modification update requires logging or removal
+    of privileges that needs to wait, -EAGAIN is returned.
+
+  Patch 11: xfs: add async buffered write support
+    Take the ilock in nowait mode if async buffered writes are enabled.
+
+  Patch 12: io_uring: add support for async buffered writes
+    This enables the async buffered writes optimization in io_uring.
+    Buffered writes are enabled for blocks that are already in the page
+    cache.
+
+  Patch 13: io_uring: Add tracepoint for short writes
+
+Support for write throttling of async buffered writes:
+
+  Patch 14: sched: add new fields to task_struct
+    Add two new fields to the task_struct. These fields store the
+    deadline after which writes are no longer throttled.
+
+  Patch 15: mm: support write throttling for async buffered writes
+    This changes the balance_dirty_pages function to take an additional
+    parameter. When nowait is specified the write throttling code no
+    longer waits synchronously for the deadline to expire. Instead
+    it sets the fields in task_struct. Once the deadline expires the
+    fields are reset.
+    
+  Patch 16: iomap: User throttling for async buffered writes.
+    Enable async buffered write throttling in iomap.
+
+  Patch 17: io_uring: support write throttling for async buffered writes
+    Adds support to io_uring for write throttling. When the writes
+    are throttled, the write requests are added to the pending io list.
+    Once the write throttling deadline expires, the writes are submitted.
+
+Enable async buffered write support in xfs
+  Patch 18: xfs: enable async buffered write support
+    This enables the flag that enables async buffered writes for xfs.
+
+
+Testing:
+  This patch has been tested with xfstests and fio.
+
+
+Updates:
+- V3: - Add changes for inode time modification
+- V4: - Update to 5.18
+      - Add check for sguid/suid and no_wait processing
+- v5: - Changed commit messages for patches without functional changes
+      - Split the patch 3 in two patches
+      - Moved alloc statement out of definition in io_uring.
+      - Removed patch 16, that introduced a new bool parameter to
+        file_modified
+      - Added check and action function for the file priv removals
+      - Added check and action function for the file modification time
+        update
+      - Exposed the above four functions
+      - Use the new functions in the xfs code for the nowait code path.
+
+
+Stefan Roesch (18):
+  block: add check for async buffered writes to generic_write_checks
+  mm: add FGP_ATOMIC flag to __filemap_get_folio()
+  iomap: add iomap_page_create_gfp to allocate iomap_pages
+  iomap: use iomap_page_create_gfp() in __iomap_write_begin
+  iomap: add async buffered write support
+  xfs: add iomap async buffered write support
+  fs: split off need_remove_file_privs() do_remove_file_privs()
+  fs: split off need_file_update_time and do_file_update_time
+  fs: add pending file update time flag.
+  xfs: Enable async write file modification handling.
+  xfs: add async buffered write support
+  io_uring: add support for async buffered writes
+  io_uring: add tracepoint for short writes
+  sched: add new fields to task_struct
+  mm: support write throttling for async buffered writes
+  iomap: User throttling for async buffered writes.
+  io_uring: support write throttling for async buffered writes
+  xfs: enable async buffered write support
+
+ fs/inode.c                      | 127 +++++++++++++++++++++----------
+ fs/io_uring.c                   | 131 +++++++++++++++++++++++++++++---
+ fs/iomap/buffered-io.c          |  63 +++++++++++++--
+ fs/read_write.c                 |   3 +-
+ fs/xfs/xfs_file.c               |  50 ++++++++++--
+ fs/xfs/xfs_iomap.c              |  33 +++++++-
+ include/linux/fs.h              |  14 ++++
+ include/linux/pagemap.h         |   1 +
+ include/linux/sched.h           |   3 +
+ include/linux/writeback.h       |   1 +
+ include/trace/events/io_uring.h |  25 ++++++
+ kernel/fork.c                   |   1 +
+ mm/filemap.c                    |   3 +
+ mm/page-writeback.c             |  54 +++++++++----
+ 14 files changed, 423 insertions(+), 86 deletions(-)
+
+
+base-commit: ad9c6ee642a61adae93dfa35582b5af16dc5173a
+-- 
+2.30.2
+

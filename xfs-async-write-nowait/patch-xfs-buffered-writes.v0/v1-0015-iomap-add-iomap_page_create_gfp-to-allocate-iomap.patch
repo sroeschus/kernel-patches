@@ -1,0 +1,63 @@
+From 42877e66776ce7a2add3b1c96fce3ff5cae485de Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:11:34 -0800
+Subject: [PATCH v1 15/19] iomap: add iomap_page_create_gfp to allocate
+ iomap_pages
+
+Add the function iomap_page_create_gfp() to be able to specify
+gfp flags and to pass in the Number of blocks per folio in
+the function iomap_page_create_gfp().
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/iomap/buffered-io.c | 34 ++++++++++++++++++++++++++++++++++
+ 1 file changed, 34 insertions(+)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 16f8eba6493c..b330ae028b46 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -61,6 +61,40 @@ iomap_page_create(struct inode *inode, struct folio *folio)
+ 	return iop;
+ }
+ 
++/**
++ * iomap_page_create_gfp : Return iomap_page for folio.
++ * @inode     : Pointer to inode
++ * @folio     : Pointer to folio
++ * @nr_blocks : Number of blocks in the folio
++ * @gfp       : gfp allocation flags
++ *
++ * This function returns a iomap for the folio. If the iomap page already
++ * exits, it returns the exisiting page otherwise it creates a new iomap_page
++ * with the settings specified in the gfp parameter.
++ *
++ * Note: The function can return the NULL value and it is not considered
++ *       an error. The caller also needs to check the nr_blocks value.
++ **/
++static struct iomap_page *
++iomap_page_create_gfp(struct inode *inode, struct folio *folio,
++		unsigned int nr_blocks, gfp_t gfp)
++{
++	struct iomap_page *iop = to_iomap_page(folio);
++
++	if (iop || nr_blocks <= 1)
++		return iop;
++
++	iop = kzalloc(struct_size(iop, uptodate, BITS_TO_LONGS(nr_blocks)), gfp);
++	if (!iop)
++		return iop;
++
++	spin_lock_init(&iop->uptodate_lock);
++	if (folio_test_uptodate(folio))
++		bitmap_fill(iop->uptodate, nr_blocks);
++	folio_attach_private(folio, iop);
++	return iop;
++}
++
+ static void iomap_page_release(struct folio *folio)
+ {
+ 	struct iomap_page *iop = folio_detach_private(folio);
+-- 
+2.30.2
+

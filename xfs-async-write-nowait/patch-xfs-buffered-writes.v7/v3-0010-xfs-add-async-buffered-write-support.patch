@@ -1,0 +1,78 @@
+From 04fe50fe844ee76737ed9871305c05f4e375cbf1 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:19:10 -0800
+Subject: [RFC PATCH v3 10/17] xfs: add async buffered write support
+
+This adds the async buffered write support to XFS. For async buffered
+write requests, the request will return -EAGAIN if the ilock cannot be
+obtained immediately.
+
+This splits off a new helper xfs_ilock_inode from the existing helper
+xfs_ilock_iocb so it can be used for this function. The exising helper
+cannot be used as it hardcoded the inode to be used.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_file.c | 28 ++++++++++++++++++----------
+ 1 file changed, 18 insertions(+), 10 deletions(-)
+
+diff --git a/fs/xfs/xfs_file.c b/fs/xfs/xfs_file.c
+index 793918c83755..d6ddc8dd6d0d 100644
+--- a/fs/xfs/xfs_file.c
++++ b/fs/xfs/xfs_file.c
+@@ -190,14 +190,13 @@ xfs_file_fsync(
+ 	return error;
+ }
+ 
+-static int
+-xfs_ilock_iocb(
+-	struct kiocb		*iocb,
++static inline int
++xfs_ilock_inode(
++	struct xfs_inode	*ip,
++	int			flags,
+ 	unsigned int		lock_mode)
+ {
+-	struct xfs_inode	*ip = XFS_I(file_inode(iocb->ki_filp));
+-
+-	if (iocb->ki_flags & IOCB_NOWAIT) {
++	if (flags & IOCB_NOWAIT) {
+ 		if (!xfs_ilock_nowait(ip, lock_mode))
+ 			return -EAGAIN;
+ 	} else {
+@@ -207,6 +206,16 @@ xfs_ilock_iocb(
+ 	return 0;
+ }
+ 
++static int
++xfs_ilock_iocb(
++	struct kiocb		*iocb,
++	unsigned int		lock_mode)
++{
++	struct xfs_inode	*ip = XFS_I(file_inode(iocb->ki_filp));
++
++	return xfs_ilock_inode(ip, iocb->ki_flags, lock_mode);
++}
++
+ STATIC ssize_t
+ xfs_file_dio_read(
+ 	struct kiocb		*iocb,
+@@ -702,12 +711,11 @@ xfs_file_buffered_write(
+ 	bool			cleared_space = false;
+ 	int			iolock;
+ 
+-	if (iocb->ki_flags & IOCB_NOWAIT)
+-		return -EOPNOTSUPP;
+-
+ write_retry:
+ 	iolock = XFS_IOLOCK_EXCL;
+-	xfs_ilock(ip, iolock);
++	ret = xfs_ilock_inode(ip, iocb->ki_flags, iolock);
++	if (ret)
++		return ret;
+ 
+ 	ret = xfs_file_write_checks(iocb, from, &iolock);
+ 	if (ret)
+-- 
+2.30.2
+

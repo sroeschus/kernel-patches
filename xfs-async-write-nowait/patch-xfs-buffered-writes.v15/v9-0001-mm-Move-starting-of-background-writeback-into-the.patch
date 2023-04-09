@@ -1,0 +1,78 @@
+From 30842610bfed15a415636be4ae356277071ede03 Mon Sep 17 00:00:00 2001
+From: Jan Kara <jack@suse.cz>
+Date: Tue, 17 May 2022 22:23:40 +0200
+Subject: [PATCH v9 01/14] mm: Move starting of background writeback into the
+ main balancing loop
+
+We start background writeback if we are over background threshold after
+exiting the main loop in balance_dirty_pages(). This may result in
+basing the decision on already stale values (we may have slept for
+significant amount of time) and it is also inconvenient for refactoring
+needed for async dirty throttling. Move the check into the main waiting
+loop.
+
+Signed-off-by: Jan Kara <jack@suse.cz>
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ mm/page-writeback.c | 31 ++++++++++++++-----------------
+ 1 file changed, 14 insertions(+), 17 deletions(-)
+
+diff --git a/mm/page-writeback.c b/mm/page-writeback.c
+index 55c2776ae699..e59c523aed1a 100644
+--- a/mm/page-writeback.c
++++ b/mm/page-writeback.c
+@@ -1627,6 +1627,19 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 			}
+ 		}
+ 
++		/*
++		 * In laptop mode, we wait until hitting the higher threshold
++		 * before starting background writeout, and then write out all
++		 * the way down to the lower threshold.  So slow writers cause
++		 * minimal disk activity.
++		 *
++		 * In normal mode, we start background writeout at the lower
++		 * background_thresh, to keep the amount of dirty memory low.
++		 */
++		if (!laptop_mode && nr_reclaimable > gdtc->bg_thresh &&
++		    !writeback_in_progress(wb))
++			wb_start_background_writeback(wb);
++
+ 		/*
+ 		 * Throttle it only when the background writeback cannot
+ 		 * catch-up. This avoids (excessively) small writeouts
+@@ -1657,6 +1670,7 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 			break;
+ 		}
+ 
++		/* Start writeback even when in laptop mode */
+ 		if (unlikely(!writeback_in_progress(wb)))
+ 			wb_start_background_writeback(wb);
+ 
+@@ -1823,23 +1837,6 @@ static void balance_dirty_pages(struct bdi_writeback *wb,
+ 
+ 	if (!dirty_exceeded && wb->dirty_exceeded)
+ 		wb->dirty_exceeded = 0;
+-
+-	if (writeback_in_progress(wb))
+-		return;
+-
+-	/*
+-	 * In laptop mode, we wait until hitting the higher threshold before
+-	 * starting background writeout, and then write out all the way down
+-	 * to the lower threshold.  So slow writers cause minimal disk activity.
+-	 *
+-	 * In normal mode, we start background writeout at the lower
+-	 * background_thresh, to keep the amount of dirty memory low.
+-	 */
+-	if (laptop_mode)
+-		return;
+-
+-	if (nr_reclaimable > gdtc->bg_thresh)
+-		wb_start_background_writeback(wb);
+ }
+ 
+ static DEFINE_PER_CPU(int, bdp_ratelimits);
+-- 
+2.30.2
+

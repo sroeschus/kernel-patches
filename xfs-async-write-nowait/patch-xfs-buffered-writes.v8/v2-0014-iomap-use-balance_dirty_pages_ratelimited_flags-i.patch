@@ -1,0 +1,53 @@
+From 7685776dc8b6a4e4ebdffc8e372e76d7696d4c1a Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 12 May 2022 12:59:29 -0700
+Subject: [RFC PATCH v2 14/16] iomap: use balance_dirty_pages_ratelimited_flags
+ in iomap_write_iter
+
+This replaces the call to balance_dirty_pages_ratelimited() with the
+call to balance_dirty_pages_ratelimited_flags. This allows to specify if
+the write request is async or not.
+
+In addition this also moves the above function call to the beginning of
+the function. If the function call is at the end of the function and the
+decision is made to throttle writes, then there is no request that
+io-uring can wait on. By moving it to the beginning of the function, the
+write request is not issued, but returns -EAGAIN instead. io-uring will
+punt the request and process it in the io-worker.
+
+By moving the function call to the beginning of the function, the write
+throttling will happen one page later.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/iomap/buffered-io.c | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index ceb3091f94c2..41a8e0bb2edd 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -794,6 +794,11 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		bytes = min_t(unsigned long, PAGE_SIZE - offset,
+ 						iov_iter_count(i));
+ again:
++		status = balance_dirty_pages_ratelimited_flags(iter->inode->i_mapping,
++						(iter->flags & IOMAP_NOWAIT));
++		if (unlikely(status))
++			break;
++
+ 		if (bytes > length)
+ 			bytes = length;
+ 
+@@ -842,8 +847,6 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		pos += status;
+ 		written += status;
+ 		length -= status;
+-
+-		balance_dirty_pages_ratelimited(iter->inode->i_mapping);
+ 	} while (iov_iter_count(i) && length);
+ 
+ 	return written ? written : status;
+-- 
+2.30.2
+

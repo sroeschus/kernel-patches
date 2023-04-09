@@ -1,0 +1,73 @@
+From 139f32b5ce87345e2d876fab68aa88b4b78cbf6b Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 12 May 2022 12:59:29 -0700
+Subject: [RFC PATCH v4 07/17] iomap: Use balance_dirty_pages_ratelimited_flags
+ in iomap_write_iter
+
+This replaces the call to balance_dirty_pages_ratelimited() with the
+call to balance_dirty_pages_ratelimited_flags. This allows to specify if
+the write request is async or not.
+
+In addition this also moves the above function call to the beginning of
+the function. If the function call is at the end of the function and the
+decision is made to throttle writes, then there is no request that
+io-uring can wait on. By moving it to the beginning of the function, the
+write request is not issued, but returns -EAGAIN instead. io-uring will
+punt the request and process it in the io-worker.
+
+By moving the function call to the beginning of the function, the write
+throttling will happen one page later.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/iomap/buffered-io.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index 187f4ddd7ba7..020452467ca8 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -765,14 +765,22 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 	do {
+ 		struct folio *folio;
+ 		struct page *page;
++		struct address_space *mapping = iter->inode->i_mapping;
+ 		unsigned long offset;	/* Offset into pagecache page */
+ 		unsigned long bytes;	/* Bytes to write to page */
+ 		size_t copied;		/* Bytes copied from user */
++		unsigned int bdp_flags =
++			(iter->flags & IOMAP_NOWAIT) ? BDP_ASYNC : 0;
+ 
+ 		offset = offset_in_page(pos);
+ 		bytes = min_t(unsigned long, PAGE_SIZE - offset,
+ 						iov_iter_count(i));
+ again:
++		status = balance_dirty_pages_ratelimited_flags(mapping,
++							       bdp_flags);
++		if (unlikely(status))
++			break;
++
+ 		if (bytes > length)
+ 			bytes = length;
+ 
+@@ -796,7 +804,7 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 			break;
+ 
+ 		page = folio_file_page(folio, pos >> PAGE_SHIFT);
+-		if (mapping_writably_mapped(iter->inode->i_mapping))
++		if (mapping_writably_mapped(mapping))
+ 			flush_dcache_page(page);
+ 
+ 		copied = copy_page_from_iter_atomic(page, offset, bytes, i);
+@@ -821,8 +829,6 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		pos += status;
+ 		written += status;
+ 		length -= status;
+-
+-		balance_dirty_pages_ratelimited(iter->inode->i_mapping);
+ 	} while (iov_iter_count(i) && length);
+ 
+ 	return written ? written : status;
+-- 
+2.30.2
+

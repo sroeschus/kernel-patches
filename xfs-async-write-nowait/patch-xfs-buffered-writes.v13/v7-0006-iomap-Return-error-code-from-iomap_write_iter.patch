@@ -1,0 +1,92 @@
+From 904c68e30c765932a6c375d91885eb1cb3477b7d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 31 May 2022 11:02:48 -0700
+Subject: [PATCH v7 06/15] iomap: Return error code from iomap_write_iter()
+
+Change the signature of iomap_write_iter() to return an error code. In
+case we cannot allocate a page in iomap_write_begin(), we will not retry
+the memory alloction in iomap_write_begin().
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/iomap/buffered-io.c | 23 ++++++++++++++---------
+ 1 file changed, 14 insertions(+), 9 deletions(-)
+
+diff --git a/fs/iomap/buffered-io.c b/fs/iomap/buffered-io.c
+index b06a5c24a4db..e96ab9a3072c 100644
+--- a/fs/iomap/buffered-io.c
++++ b/fs/iomap/buffered-io.c
+@@ -754,12 +754,13 @@ static size_t iomap_write_end(struct iomap_iter *iter, loff_t pos, size_t len,
+ 	return ret;
+ }
+ 
+-static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
++static int iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i, loff_t *processed)
+ {
+ 	loff_t length = iomap_length(iter);
+ 	loff_t pos = iter->pos;
+ 	ssize_t written = 0;
+ 	long status = 0;
++	int error = 0;
+ 	struct address_space *mapping = iter->inode->i_mapping;
+ 	unsigned int bdp_flags = (iter->flags & IOMAP_NOWAIT) ? BDP_ASYNC : 0;
+ 
+@@ -774,9 +775,9 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		bytes = min_t(unsigned long, PAGE_SIZE - offset,
+ 						iov_iter_count(i));
+ again:
+-		status = balance_dirty_pages_ratelimited_flags(mapping,
++		error = balance_dirty_pages_ratelimited_flags(mapping,
+ 							       bdp_flags);
+-		if (unlikely(status))
++		if (unlikely(error))
+ 			break;
+ 
+ 		if (bytes > length)
+@@ -793,12 +794,12 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		 * faulting the user page.
+ 		 */
+ 		if (unlikely(fault_in_iov_iter_readable(i, bytes) == bytes)) {
+-			status = -EFAULT;
++			error = -EFAULT;
+ 			break;
+ 		}
+ 
+-		status = iomap_write_begin(iter, pos, bytes, &folio);
+-		if (unlikely(status))
++		error = iomap_write_begin(iter, pos, bytes, &folio);
++		if (unlikely(error))
+ 			break;
+ 
+ 		page = folio_file_page(folio, pos >> PAGE_SHIFT);
+@@ -829,7 +830,8 @@ static loff_t iomap_write_iter(struct iomap_iter *iter, struct iov_iter *i)
+ 		length -= status;
+ 	} while (iov_iter_count(i) && length);
+ 
+-	return written ? written : status;
++	*processed = written ? written : error;
++	return error;
+ }
+ 
+ ssize_t
+@@ -843,12 +845,15 @@ iomap_file_buffered_write(struct kiocb *iocb, struct iov_iter *i,
+ 		.flags		= IOMAP_WRITE,
+ 	};
+ 	int ret;
++	int error = 0;
+ 
+ 	if (iocb->ki_flags & IOCB_NOWAIT)
+ 		iter.flags |= IOMAP_NOWAIT;
+ 
+-	while ((ret = iomap_iter(&iter, ops)) > 0)
+-		iter.processed = iomap_write_iter(&iter, i);
++	while ((ret = iomap_iter(&iter, ops)) > 0) {
++		if (error != -EAGAIN)
++			error = iomap_write_iter(&iter, i, &iter.processed);
++	}
+ 	if (iter.pos == iocb->ki_pos)
+ 		return ret;
+ 	return iter.pos - iocb->ki_pos;
+-- 
+2.30.2
+

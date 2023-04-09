@@ -1,0 +1,77 @@
+From f83fc8677b75948fea7d1a64eb2d0e38dd34f7b6 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Fri, 4 Mar 2022 12:16:54 -0800
+Subject: [RFC PATCH v3 05/17] xfs: add iomap async buffered write support
+
+This adds the async buffered write support to the iomap layer of XFS. If
+a lock cannot be acquired or additional reads need to be performed, the
+request will return -EAGAIN in case this is an async buffered write request.
+
+This patch introduces a new helper xfs_ilock_excl_for_imap that gets an
+exclusive lock. The already exisiting helper xfs_ilock_for_imap cannot
+be used as it tries to deduce the lock mode, but the deduction is not
+always correct in the write code path.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ fs/xfs/xfs_iomap.c | 32 ++++++++++++++++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/fs/xfs/xfs_iomap.c b/fs/xfs/xfs_iomap.c
+index e552ce541ec2..e8cf5d94aa5c 100644
+--- a/fs/xfs/xfs_iomap.c
++++ b/fs/xfs/xfs_iomap.c
+@@ -703,6 +703,31 @@ xfs_ilock_for_iomap(
+ 	return 0;
+ }
+ 
++static int
++xfs_ilock_excl_for_iomap(
++	struct xfs_inode	*ip,
++	unsigned int		flags)
++{
++	/*
++	 * Extents not yet cached requires exclusive access, don't block.  This
++	 * is an opencoded xfs_ilock_data_map_shared() call but with
++	 * non-blocking behaviour.
++	 */
++	if (xfs_need_iread_extents(&ip->i_df)) {
++		if (flags & IOMAP_NOWAIT)
++			return -EAGAIN;
++	}
++
++	if (flags & IOMAP_NOWAIT) {
++		if (!xfs_ilock_nowait(ip, XFS_ILOCK_EXCL))
++			return -EAGAIN;
++	} else {
++		xfs_ilock(ip, XFS_ILOCK_EXCL);
++	}
++
++	return 0;
++}
++
+ /*
+  * Check that the imap we are going to return to the caller spans the entire
+  * range that the caller requested for the IO.
+@@ -886,13 +911,16 @@ xfs_buffered_write_iomap_begin(
+ 		return -EIO;
+ 
+ 	/* we can't use delayed allocations when using extent size hints */
+-	if (xfs_get_extsz_hint(ip))
++	if (xfs_get_extsz_hint(ip)) {
+ 		return xfs_direct_write_iomap_begin(inode, offset, count,
+ 				flags, iomap, srcmap);
++	}
+ 
+ 	ASSERT(!XFS_IS_REALTIME_INODE(ip));
+ 
+-	xfs_ilock(ip, XFS_ILOCK_EXCL);
++	error = xfs_ilock_excl_for_iomap(ip, flags);
++	if (error)
++		return error;
+ 
+ 	if (XFS_IS_CORRUPT(mp, !xfs_ifork_has_extents(&ip->i_df)) ||
+ 	    XFS_TEST_ERROR(false, mp, XFS_ERRTAG_BMAPIFORMAT)) {
+-- 
+2.30.2
+

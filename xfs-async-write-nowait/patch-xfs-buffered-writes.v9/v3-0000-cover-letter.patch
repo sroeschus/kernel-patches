@@ -1,0 +1,167 @@
+From 4b12eefd0c1df6e4fb066c30f2c77d49cd84b7cf Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 18 May 2022 16:00:46 -0700
+Subject: [RFC PATCH v3 00/18] io-uring/xfs: support async buffered writes
+
+This patch series adds support for async buffered writes when using both
+xfs and io-uring. Currently io-uring only supports buffered writes in the
+slow path, by processing them in the io workers. With this patch series it is
+now possible to support buffered writes in the fast path. To be able to use
+the fast path the required pages must be in the page cache, the required locks
+in xfs can be granted immediately and no additional blocks need to be read
+form disk.
+
+Updating the inode can take time. An optimization has been implemented for
+the time update. Time updates will be processed in the slow path. While there
+is already a time update in process, other write requests for the same file,
+can skip the update of the modification time.
+  
+
+Performance results:
+  For fio the following results have been obtained with a queue depth of
+  1 and 4k block size (runtime 600 secs):
+
+                 sequential writes:
+                 without patch           with patch      libaio     psync
+  iops:              77k                    209k          195K       233K
+  bw:               314MB/s                 854MB/s       790MB/s    953MB/s
+  clat:            9600ns                   120ns         540ns     3000ns
+
+
+For an io depth of 1, the new patch improves throughput by over three times
+(compared to the exiting behavior, where buffered writes are processed by an
+io-worker process) and also the latency is considerably reduced. To achieve the
+same or better performance with the exisiting code an io depth of 4 is required.
+Increasing the iodepth further does not lead to improvements.
+
+In addition the latency of buffered write operations is reduced considerably.
+
+
+
+Support for async buffered writes:
+
+  To support async buffered writes the flag FMODE_BUF_WASYNC is introduced. In
+  addition the check in generic_write_checks is modified to allow for async
+  buffered writes that have this flag set.
+
+  Changes to the iomap page create function to allow the caller to specify
+  the gfp flags. Sets the IOMAP_NOWAIT flag in iomap if IOCB_NOWAIT has been set
+  and specifies the requested gfp flags.
+
+  Adds the iomap async buffered write support to the xfs iomap layer.
+  Adds async buffered write support to the xfs iomap layer.
+
+Support for async buffered write support and inode time modification
+
+  Splits the functions for checking if the file privileges need to be removed in
+  two functions: check function and a function for the removal of file privileges.
+  The same split is also done for the function to update the file modification time.
+
+  Implement an optimization that while a file modification time is pending other
+  requests for the same file don't need to wait for the file modification update. 
+  This avoids that a considerable number of buffered async write requests get
+  punted.
+
+  Take the ilock in nowait mode if async buffered writes are enabled and enable
+  the async buffered writes optimization in io_uring.
+
+Support for write throttling of async buffered writes:
+
+  Add a no_wait parameter to the exisiting balance_dirty_pages() function. The
+  function will return -EAGAIN if the parameter is true and write throttling is
+  required.
+
+  Add a new function called balance_dirty_pages_ratelimited_async() that will be
+  invoked from iomap_write_iter() if an async buffered write is requested.
+  
+Enable async buffered write support in xfs
+   This enables async buffered writes for xfs.
+
+
+Testing:
+  This patch has been tested with xfstests and fio.
+
+
+Changes:
+  V3:
+  - Reformat new code in generic_write_checks_count() to line lengthof 80.
+  - Remove if condition in __iomap_write_begin to maintain current behavior.
+  - use GFP_NOWAIT flag in __iomap_write_begin
+  - rename need_file_remove_privs() function to file_needs_remove_privs()
+  - rename do_file_remove_privs to __file_remove_privs()
+  - add kernel documentation to file_remove_privs() function
+  - rework else if branch in file_remove_privs() function
+  - add kernel documentation to file_modified() function
+  - add kernel documentation to file_modified_async() function
+  - rename err variable in file_update_time to ret
+  - rename function need_file_update_time() to file_needs_update_time()
+  - rename function do_file_update_time() to __file_update_time()
+  - don't move check for FMODE_NOCMTIME in generic helper
+  - reformat __file_update_time for easier reading
+  - add kernel documentation to file_update_time() function
+  - fix if in file_update_time from < to <=
+  - move modification of inode flags from do_file_update_time to file_modified()
+    When this function is called, the caller must hold the inode lock.
+  - 3 new patches from Jan to add new no_wait flag to balance_dirty_pages(),
+    remove patch 12 from previous series
+  - Make balance_dirty_pages_ratelimited_flags() a static function
+  - Add new balance_dirty_pages_ratelimited_async() function
+  
+  V2:
+  - Remove atomic allocation
+  - Use direct write in xfs_buffered_write_iomap_begin()
+  - Use xfs_ilock_for_iomap() in xfs_buffered_write_iomap_begin()
+  - Remove no_wait check at the end of xfs_buffered_write_iomap_begin() for
+    the COW path.
+  - Pass xfs_inode pointer to xfs_ilock_iocb and rename function to
+    xfs_lock_xfs_inode
+  - Replace existing uses of xfs_ilock_iocb with xfs_ilock_xfs_inode
+  - Use xfs_ilock_xfs_inode in xfs_file_buffered_write()
+  - Callers of xfs_ilock_for_iomap need to initialize lock mode. This is
+    required so writes use an exclusive lock
+  - Split of _balance_dirty_pages() from balance_dirty_pages() and return
+    sleep time
+  - Call _balance_dirty_pages() in balance_dirty_pages_ratelimited_flags()
+  - Move call to balance_dirty_pages_ratelimited_flags() in iomap_write_iter()
+    to the beginning of the loop
+
+
+Jan Kara (3):
+  mm: Move starting of background writeback into the main balancing loop
+  mm: Move updates of dirty_exceeded into one place
+  mm: Prepare balance_dirty_pages() for async buffered writes
+
+Stefan Roesch (15):
+  block: Add check for async buffered writes to generic_write_checks
+  iomap: Add iomap_page_create_gfp to allocate iomap_pages
+  iomap: Use iomap_page_create_gfp() in __iomap_write_begin
+  iomap: Add async buffered write support
+  xfs: Add iomap async buffered write support
+  fs: Split off remove_needs_file_privs() __remove_file_privs()
+  fs: Split off file_needs_update_time and __file_update_time
+  xfs: Enable async write file modification handling.
+  fs: Optimization for concurrent file time updates.
+  xfs: Add async buffered write support
+  io_uring: Add support for async buffered writes
+  mm: Add balance_dirty_pages_ratelimited_async() function
+  iomap: Use balance_dirty_pages_ratelimited_flags in iomap_write_iter
+  io_uring: Add tracepoint for short writes
+  xfs: Enable async buffered write support
+
+ fs/inode.c                      | 178 ++++++++++++++++++++++++--------
+ fs/io_uring.c                   |  32 +++++-
+ fs/iomap/buffered-io.c          |  71 +++++++++++--
+ fs/read_write.c                 |   4 +-
+ fs/xfs/xfs_file.c               |  36 +++----
+ fs/xfs/xfs_iomap.c              |  14 ++-
+ include/linux/fs.h              |   7 ++
+ include/linux/writeback.h       |   1 +
+ include/trace/events/io_uring.h |  25 +++++
+ mm/page-writeback.c             | 108 ++++++++++++-------
+ 10 files changed, 352 insertions(+), 124 deletions(-)
+
+
+base-commit: 0cdd776ec92c0fec768c7079331804d3e52d4b27
+-- 
+2.30.2
+
