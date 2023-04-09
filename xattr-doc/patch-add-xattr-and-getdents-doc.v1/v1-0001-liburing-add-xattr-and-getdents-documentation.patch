@@ -1,0 +1,153 @@
+From 65eb98cbaddf59edd0d3d080cea332c0ca8095c6 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 29 Dec 2021 13:30:43 -0800
+Subject: [PATCH v1] liburing: add xattr and getdents documentation
+
+This adds the getdents and xattr API documentation to the
+io_uring_enter man page.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+---
+ man/io_uring_enter.2 | 106 ++++++++++++++++++++++++++++++++++++-------
+ 1 file changed, 89 insertions(+), 17 deletions(-)
+
+diff --git a/man/io_uring_enter.2 b/man/io_uring_enter.2
+index 589f3ef..9b1d0f9 100644
+--- a/man/io_uring_enter.2
++++ b/man/io_uring_enter.2
+@@ -176,7 +176,7 @@ struct io_uring_sqe {
+     __u16   ioprio;         /* ioprio for the request */
+     __s32   fd;             /* file descriptor to do IO on */
+     union {
+-        __u64   off;            /* offset into file */
++        __u64   off;        /* offset into file */
+         __u64   addr2;
+     };
+     union {
+@@ -201,26 +201,23 @@ struct io_uring_sqe {
+         __u32    rename_flags;
+         __u32    unlink_flags;
+         __u32    hardlink_flags;
++        __u32    xattr_flags;
+     };
+-    __u64    user_data;     /* data to be passed back at completion time */
++    __u64 user_data; /* data to be passed back at completion time */
+     union {
+-    struct {
+         /* index into fixed buffers, if used */
+-            union {
+-                /* index into fixed buffers, if used */
+-                __u16    buf_index;
+-                /* for grouped buffer selection */
+-                __u16    buf_group;
+-            }
+-        /* personality to use, if used */
+-        __u16    personality;
+-        union {
+-            __s32    splice_fd_in;
+-            __u32    file_index;
+-	};
+-    };
+-    __u64    __pad2[3];
++        __u16    buf_index;
++        /* for grouped buffer selection */
++        __u16    buf_group;
++    } __attribute__((packed))
++    /* personality to use, if used */
++    __u16    personality;
++    union {
++        __s32    splice_fd_in;
++        __u32    file_index;
+     };
++    __u64    addr3;
++    __u64    __pad2[1];
+ };
+ .EE
+ .in
+@@ -1024,6 +1021,81 @@ being passed in to
+ .BR linkat(2).
+ Available since 5.15.
+ 
++.TP
++.B IORING_OP_GETDENTS
++Issue the equivalent of a
++.BR getdents64(2)
++system call.
++.I fd
++should be set to the dirfd,
++.I addr
++should point to linux_dirent64 structure
++.I len
++should be set to the size of the above structure
++.I off
++should be set to the directory offset.
++Available since 5.17.
++
++.TP
++.B IORING_OP_GETXATTR
++Issue the equivalent of a
++.BR getxattr(2)
++system call.
++.I addr
++should point to the attribute name,
++.I len
++should be set to the length of the attribute value,
++.I off
++should point to the attribute value,
++.I addr3
++should point to the path name.
++Available since 5.17.
++
++.TP
++.B IORING_OP_FGETXATTR
++Issue the equivalent of a
++.BR fgetxattr(2)
++system call.
++.I fd
++should be set to the file descriptor of the file,
++.I addr
++should point to the attribute name,
++.I len
++should be set to the length of the attribute value,
++.I off
++should point to the attribute value.
++Available since 5.17.
++
++.TP
++.B IORING_OP_SETXATTR
++Issue the equivalent of a
++.BR setxattr(2)
++system call.
++.I addr
++should point to the attribute name,
++.I len
++should be set to the length of the attribute value,
++.I off
++should point to the attribute value,
++.I addr3
++should point to the path name.
++Available since 5.17.
++
++.TP
++.B IORING_OP_FSETXATTR
++Issue the equivalent of a
++.BR fsetxattr(2)
++system call.
++.I fd
++should be set to the file descriptor of the file,
++.I addr
++should point to the attribute name,
++.I len
++should be set to the length of the attribute value,
++.I off
++should point to the attribute value.
++Available since 5.17.
++
+ .PP
+ The
+ .I flags
+
+base-commit: 18d71076f6c97e1b25aa0e3b0e12a913ec4717fa
+-- 
+2.30.2
+
