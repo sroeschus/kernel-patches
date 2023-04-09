@@ -1,0 +1,541 @@
+From 08a53143265b3bf4bc17ab310fcb738c01946165 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Tue, 21 Dec 2021 13:30:08 -0800
+Subject: [PATCH v6 0/5] io_uring: add xattr support
+
+This adds the xattr support to io_uring. The intent is to have a more
+complete support for file operations in io_uring.
+
+This change adds support for the following functions to io_uring:
+- fgetxattr
+- fsetxattr
+- getxattr
+- setxattr
+
+Patch 1: fs: split off do_user_path_at_empty from user_path_at_empty()
+  This splits off a new function do_user_path_at_empty from
+  user_path_at_empty that is based on filename and not on a
+  user-specified string.
+
+Patch 2: fs: split off setxattr_setup function from setxattr
+  Split off the setup part of the setxattr function.
+
+Patch 3: fs: split off do_getxattr from getxattr
+  Split of the do_getxattr part from getxattr. This will
+  allow it to be invoked it from io_uring.
+
+Patch 4: io_uring: add fsetxattr and setxattr support
+  This adds new functions to support the fsetxattr and setxattr
+  functions.
+
+Patch 5: io_uring: add fgetxattr and getxattr support
+  This adds new functions to support the fgetxattr and getxattr
+  functions.
+
+
+There are two additional patches:
+  liburing: Add support for xattr api's.
+            This also includes the tests for the new code.
+  xfstests: Add support for io_uring xattr support.
+
+
+V6: - use xattr_ctx in do_getxattr function signature
+V5: - add kname array to xattr_ctx structure
+V4: - rebased patch series
+V3: - remove req->file checks in prep functions
+    - change size parameter in do_xattr
+V2: - split off function do_user_path_empty instead of changing
+      the function signature of user_path_at
+    - Fix datatype size problem in do_getxattr
+
+
+Stefan Roesch (5):
+  fs: split off do_user_path_at_empty from user_path_at_empty()
+  fs: split off setxattr_setup function from setxattr
+  fs: split off do_getxattr from getxattr
+  io_uring: add fsetxattr and setxattr support
+  io_uring: add fgetxattr and getxattr support
+
+ fs/internal.h                 |  23 +++
+ fs/io_uring.c                 | 293 ++++++++++++++++++++++++++++++++++
+ fs/namei.c                    |  10 +-
+ fs/xattr.c                    | 127 +++++++++------
+ include/linux/namei.h         |   2 +
+ include/uapi/linux/io_uring.h |   8 +-
+ 6 files changed, 413 insertions(+), 50 deletions(-)
+
+
+base-commit: b4518682080d3a1cdd6ea45a54ff6772b8b2797a
+prerequisite-patch-id: 7cd5cb008a0102440c119baa70de351a5a2c4015
+prerequisite-patch-id: 11305fbf25a3ad084a535b6b23758a89f40c769f
+prerequisite-patch-id: 6dce161c58e29db095994e5543eb285f0d9a9e92
+prerequisite-patch-id: 09f8f4fb9f26881c2ccd73988b0f9f061dacb03f
+prerequisite-patch-id: b423ad10546053748610734bf43563c4471ac347
+prerequisite-patch-id: 4b955f21b41bc558b2335e92c7cf08d486d5397e
+prerequisite-patch-id: 1603a6e5de623e4227e830d30bfb2d313e93e2dd
+prerequisite-patch-id: 6bd9568171628559a0334309fc2d5b49e4f377c3
+prerequisite-patch-id: ce7492f03a399a051f9a80cccccb7f0b021c9707
+prerequisite-patch-id: 13d9c36d3afc083b6009f74b4bfa9c2e5508a024
+prerequisite-patch-id: 8be05539e2d4508749bb21a2e99e722c3349ed65
+prerequisite-patch-id: e3d20d27ba995d39514134ecdfeddf0edd8aae70
+prerequisite-patch-id: 81da31e8e1c407cc9d68e43345330ac846a6b7a6
+prerequisite-patch-id: 3f99b3b8a661dc98eb41eed01af871c45a9a4ed3
+prerequisite-patch-id: 52a36933900d4439706f34d6ad893d8c03c9388b
+prerequisite-patch-id: 76a1fbb6522088e8b9068c5852a700d507cf1634
+prerequisite-patch-id: 4975ffabf138641c35d356da43b2988088b14c20
+prerequisite-patch-id: 70b943cf6b24b75d542395b9c48cec0d1d8f6fa3
+prerequisite-patch-id: c08e8ed0c90507918a593f7134b086f34a1464e1
+prerequisite-patch-id: 1edc1ed72408a79434556297b3abf1d7337b445d
+prerequisite-patch-id: 0555a6264db98fa3237f31e51a6869e7f395016f
+prerequisite-patch-id: 70ea6433e6b487256e8eaa4fb406aa048572a93b
+prerequisite-patch-id: 0d8e96e5f5fa7dab52b8024936447a4b2cacfd91
+prerequisite-patch-id: a9a33520bcb8f9cfc3ef10a5bf5d604169eaa4f3
+prerequisite-patch-id: c8a837ccb0201a47c65dfedea04578800df067f5
+prerequisite-patch-id: ce71c0b7d7f99d3eee9f2daa74d493062cf84426
+prerequisite-patch-id: a7430077ff1000bd005514262c5298d53fc143e2
+prerequisite-patch-id: 4abefff684bcc74efef70b4b4bead38a91c33e9a
+prerequisite-patch-id: 51ebf64a8f0a39d72a020bea93867a1e73d63c72
+prerequisite-patch-id: 1557f5e06ee4c6ed891c0712af1d18da4b3bec84
+prerequisite-patch-id: 4d83bc4945a9afe394300df54c0d955adec09c5d
+prerequisite-patch-id: 3036afeac11a3e72d3140abbc9e30d50aa65445d
+prerequisite-patch-id: 670e035225d4a7c3a210191d6c89b8f9838ae74c
+prerequisite-patch-id: 3dc7ab03401d172ac789759be42d1bbadd331174
+prerequisite-patch-id: 0b0a5f8d5ac725de8a16e470f4857e5a698a42bb
+prerequisite-patch-id: 8f1a1e6a675f001a5e0d0f378b0d267d85db273c
+prerequisite-patch-id: 3a09bea6a011db0fadd4da3af42795f1f41aacce
+prerequisite-patch-id: fb6999f5f7dcd763d4f4207c7850f067064a9cd5
+prerequisite-patch-id: 99d84c6ad48cbf86861fcb1088eb9f801a977b58
+prerequisite-patch-id: 8000e0f8d09ffe2c10c210c9eca45a404bdd8fa6
+prerequisite-patch-id: 7218ea7c9f39fa93408d20e9a1c33b5d4d858565
+prerequisite-patch-id: 57462d7732cd3191c625b0d7ff46c0205079a03d
+prerequisite-patch-id: 4b6f5c47893bcaba4517bb433221f2a90f371fe2
+prerequisite-patch-id: 632a134e11f6ffcd7074702190dd2f493415d78b
+prerequisite-patch-id: fdf98bd3d3f6447f5f632b28f1aaf8e0ee9b266d
+prerequisite-patch-id: 3cf20060813a855d3cd4b065ebce572e88eca0cb
+prerequisite-patch-id: 60e77a00c0da8c5200e9bcec8d951a013b2597fe
+prerequisite-patch-id: e175ca185bb66c1a83ad01618cea0115da81da39
+prerequisite-patch-id: 80f59851d5dbad943054167c4712345a0332e76a
+prerequisite-patch-id: f08b2585837960a9a60b96ec464d1b617caf1cfa
+prerequisite-patch-id: ad34c22854b3f51f3238663287be5c7e57bf5438
+prerequisite-patch-id: 81308969e836f2c785ba5cfd7a566647d5e00cb2
+prerequisite-patch-id: 3dd1ded3f5c411d36e862517c1677b49946bc810
+prerequisite-patch-id: 67b4d4ed1314d8ee53f84f659d2d8ac49f10c4ac
+prerequisite-patch-id: 7f7c7422fce279bb2122a2051d7ee3de6c145a16
+prerequisite-patch-id: b5d159c7447d934ad3f35ad5bd2959f047a8582b
+prerequisite-patch-id: 7eb393d1bc1da20fd20e4eb3d4dc965e7e07a52f
+prerequisite-patch-id: c846b59b90773b630251431669e7551d73c0ede8
+prerequisite-patch-id: ce5b340c01d1e8683a9d11447c869ff3f615f21d
+prerequisite-patch-id: 6a95e7ceb2d503a6163740822015728f2ae7bbc1
+prerequisite-patch-id: 0227335297f0188478bdd0935ffd8f27f9f955cf
+prerequisite-patch-id: 40be27b836f61c38da79494aadd247df541a1a33
+prerequisite-patch-id: 174cee11a833d81a583df3a302a64bfb7cece180
+prerequisite-patch-id: 0104e50b85d66296b555903f5f4dc1f3776951d8
+prerequisite-patch-id: b8540b9db65b93239ecdbff7e57f2950776cde75
+prerequisite-patch-id: 84359e23d5f6f9fa62b4b3b68530b54f7c23686f
+prerequisite-patch-id: 8a02c6bd9812ea841f48cfb36001f908ed7c47c5
+prerequisite-patch-id: 585163da26988fe2d256a77c1a01baa79f17dc15
+prerequisite-patch-id: 8abad8ff9bb9633cdcc9c953af1287a3007764f1
+prerequisite-patch-id: ffb83ae0076abc91a5a7ed59e6b29a8d6cdd0e1f
+prerequisite-patch-id: a6f0686804b09b9b2a4c3f44a67be12a3d894429
+prerequisite-patch-id: ed533c2a6a9162f12b7fafa9b6c6a9e2cf10bf9a
+prerequisite-patch-id: 5d238d53b80bbcc1ac04a21e3b5c5376b85f6bf3
+prerequisite-patch-id: cb6d9439337ee92aa7966252291675b63efc791c
+prerequisite-patch-id: f0451da424b755835eb658e97862f0339efb8cdf
+prerequisite-patch-id: 755250a8ede621ad2e5b3435f6aaf19b68697ac8
+prerequisite-patch-id: 696b8b21ca07f1a26f1daa33cfcbdb9dd73542e2
+prerequisite-patch-id: c746ac088ec29ce4c9951159333d806cd8d38249
+prerequisite-patch-id: 8f4836d66bb4596c958902d6fd5b2ea4a91917a8
+prerequisite-patch-id: 1ce6086afdba62f488ebb17f013bdfaba4c3c3b4
+prerequisite-patch-id: f6c25316bcf1d385e7c08ecbc26360ad1079920a
+prerequisite-patch-id: 7f562e90ee52dbb62156e4cf8fbc11b44155b7bf
+prerequisite-patch-id: b8c4797b218bc6e81f51cc7c2048ffa45908233a
+prerequisite-patch-id: de1263e1b0e1e3bf12abb0ecdf012dad872ad0c3
+prerequisite-patch-id: ca88e0d191dfded9b964ad2cc9724557bc59389b
+prerequisite-patch-id: 069172a4fc9a07d3c7e1ec4f835b209ac6fd15d5
+prerequisite-patch-id: 76e51d42333b6a934e362001045fa78c3ec50c69
+prerequisite-patch-id: b6d12fd749aef3042aea6f5e2d39bbdb07126f3c
+prerequisite-patch-id: cf015efa824bce5df54489b70fea5f4923940dee
+prerequisite-patch-id: 03660749d4c3592348ce141545e2edfdebeeba47
+prerequisite-patch-id: a0f9d1d081b16707a047c9bbb68df8eef4ff075a
+prerequisite-patch-id: e0e5ae8f5c3acc6e30f83cffc14739526a9120de
+prerequisite-patch-id: 0473636f2cbe8947cb36c9c3f3238b3cc94edca9
+prerequisite-patch-id: bdf3e7ac70149f00b10ecdf5e235ec6cab9c206a
+prerequisite-patch-id: ccbd4fdfde727aa33467dfc31129676e8b54bd5a
+prerequisite-patch-id: 5cd017ec88be1313157a84c693b7177a495df52b
+prerequisite-patch-id: 3452f17d60ab0802fb78bba2b4c19fadd74c5dff
+prerequisite-patch-id: 9da541d65f0844eb293ec5cc53d429910b381681
+prerequisite-patch-id: 4939ecaa0706496cf34f6202ecfce339801efd9d
+prerequisite-patch-id: af97c2e1a24f0c67b72757c0d313c2412b3f0208
+prerequisite-patch-id: ef24c86705e470264e8fdfa3101cce6b51adaa13
+prerequisite-patch-id: 956b64e8e3f6bdb30d6ffc4ec24aa0fa6201d01f
+prerequisite-patch-id: 6b25be7b9a0b4edb618a6236e60526c2969e6bc7
+prerequisite-patch-id: ace48b12af02e37a57da8e565ca52bd82cb2420c
+prerequisite-patch-id: b49559278e8e270dceebee6867660b4c528e4af3
+prerequisite-patch-id: 162db68c6f6527d28f201561e623a06c70b05f86
+prerequisite-patch-id: ae8cfeb1cccc7f00fb127e2aa7a678828f46ea77
+prerequisite-patch-id: 785a9c9ccf0112c9b85ed6f988e30d9d70e59ad7
+prerequisite-patch-id: 3cfbec4e2c61cf718ce94c8cbc4524fd5165d624
+prerequisite-patch-id: 212b6e038a8dc97b9552c77f77c7d65d87b5e971
+prerequisite-patch-id: d73fa4827200061ade1a96fcb24bdb2fba81d5ea
+prerequisite-patch-id: 9a6ba884b8acbe50139e8525e47d16a583444b7e
+prerequisite-patch-id: 52b330a3913cec27758beef8c57c401395b04629
+prerequisite-patch-id: 48ab96d4810de7e216a8f0fb575965cbd06d1897
+prerequisite-patch-id: 47f2feb4f15aee058ba61f6e300b47bf0e2e4105
+prerequisite-patch-id: ad1ce8a2831e426a7da268e4b733065fc1a3066a
+prerequisite-patch-id: 9560c8f7b1bcab13337c08e5293a47ccf175fe72
+prerequisite-patch-id: abdaee3d308dae3458e500bfcac5d45ebf4fa0f5
+prerequisite-patch-id: 1d646c92314fe163cdee24380137feb635529e11
+prerequisite-patch-id: 3c46854407cff7f103875ec9df16032b4948d111
+prerequisite-patch-id: 5854b3d95a64adbb71e13c13ad803fa01db2c859
+prerequisite-patch-id: 7d2b880d18353c130c4c199f7c7ef6412c696602
+prerequisite-patch-id: 2a4cbf4a6b9cae6bd81320674612a7e18cd31d56
+prerequisite-patch-id: fc235d9fcdee37817559e31a318b4453a708136d
+prerequisite-patch-id: 3bf4f773d87fb6ae42f04ef7cabb121e14c250a3
+prerequisite-patch-id: f5586db7d888a01b17b2a99264a4a1d7a96f6e43
+prerequisite-patch-id: 048fc001ab976b068d5e059e11f94cbdb3e15b90
+prerequisite-patch-id: ad803aceb2c2a736cd7226882c84234bab51dcf6
+prerequisite-patch-id: 4695a6fc15144ead0c47edfdb4f7d7de1b6054ad
+prerequisite-patch-id: 7a6c67c6e4def86e3b104db89d28ae1296422854
+prerequisite-patch-id: 7e2b1ac27e407fafd4de18a9393bf0972909fb91
+prerequisite-patch-id: ad488914e5b907001316948ab18b606c849635b8
+prerequisite-patch-id: 10cc731f9c124675e7860e14db4053c3c635cf2a
+prerequisite-patch-id: 4298497a4a6378217b6858c88380df57e53171bd
+prerequisite-patch-id: 47a4028e5337322c4d5194bcf1722a159ec79f13
+prerequisite-patch-id: 0700e185d41d8f4e3e1627823d035f6b12daa5ab
+prerequisite-patch-id: 851a444ce5c043f25302dfcc83ddaaac91787d3a
+prerequisite-patch-id: 442f96f922f36163fecca19063e4806db300e9f3
+prerequisite-patch-id: 8c9e94cdee9716d259d049166f4fe481573e6868
+prerequisite-patch-id: 7ce96cac2dfaa1c24ff5c678593254b2c9e2a4d1
+prerequisite-patch-id: 3f9c32b39a10260e420f98e7c96170daa0baa3c4
+prerequisite-patch-id: 71f6c0c16e620ef3c82cde9c66a0105d6cab5379
+prerequisite-patch-id: c18ef8fdcf8bee6d3c772917f43ec6618db69965
+prerequisite-patch-id: 3586e5a9ed7dce3f67d03cd1e809f5be799e4798
+prerequisite-patch-id: ca23b820e7fe8689edd9879c9927f1b1038ed40f
+prerequisite-patch-id: 39403fcafc7d83de4059963432f54a63471c4a63
+prerequisite-patch-id: 8ef9f03dda18dc741b18ac13e0dec3734daf7732
+prerequisite-patch-id: 91456a87172a1629477f8e54315ddb1956ef9c9e
+prerequisite-patch-id: 6ec7deea8ddb0d688a64e766fa0737af1190b770
+prerequisite-patch-id: 57b23b64e38f7e940668255c19695fed37141673
+prerequisite-patch-id: 084796d4343bb7e0e6dc3f593791fbe080292348
+prerequisite-patch-id: b0dfacf691f81a9b97f0ea865fd650b6fcf0a742
+prerequisite-patch-id: 95b676ffd7af0b8ec0e7e5f925b9337c9892be13
+prerequisite-patch-id: b75a5478eff65a70de4c5716a302975e2c73c1d4
+prerequisite-patch-id: cea554ae7a25423620bc334abea854ddbead947f
+prerequisite-patch-id: 04969d9179fc3ef52a65609881455a1d120df91c
+prerequisite-patch-id: 74f498354e811485b3e5504795a4cf4a7d3041c9
+prerequisite-patch-id: 10109173657ca02c81a590559ff9fce99467e6fe
+prerequisite-patch-id: e997492e16442cb239ea8ba48be70f8dd0b54f32
+prerequisite-patch-id: 789c400c3d24b727606ed460d7f0bb9f67af6808
+prerequisite-patch-id: e8116a359ccb2d7531b5b422b594e7576556f203
+prerequisite-patch-id: 587c6612b48dc44ca6d6ad1f8c11e82b682c3fe8
+prerequisite-patch-id: d17b269ec0edb978986429bf2735d81f6a8329cc
+prerequisite-patch-id: 90cf84e89b4b5ced18208eeb539ce449e9de6c8a
+prerequisite-patch-id: e4add2808a677c9356b77d6b2cc44729125a43d5
+prerequisite-patch-id: d0221fea66e82288cc363c970424a5ea770490a1
+prerequisite-patch-id: 4abaf57b44d8655bdd3e889137a7e13b327673d5
+prerequisite-patch-id: 1dcd6be3c7dde21c33f91cccd460f2836cfb6731
+prerequisite-patch-id: fec0098f63d4aa208a9ad075647324fb03e6ecc4
+prerequisite-patch-id: 5c99629111c2fbe8f0b3300bf8938502e1ceff54
+prerequisite-patch-id: 4731cb98d16eeec19f533a60c25947c9de642b5e
+prerequisite-patch-id: 57a08d9b6b736397c42472f1e8fc2dca7cc60a31
+prerequisite-patch-id: ffdaab1ed27aadb3ac43d607811fa51d7b115d83
+prerequisite-patch-id: c47ca0d702310652b4128d2a868a4daa9db593e9
+prerequisite-patch-id: b940d7155f3bf927ae30e621bc03c606a373dfca
+prerequisite-patch-id: e37051fd56d24f1dbae2cd66d70f6db71e7b5eb9
+prerequisite-patch-id: aff893f86983c1b9f24f04d6ce3210828398a8f3
+prerequisite-patch-id: dd1193f5cbc8d142933a05746a3191071c7abeca
+prerequisite-patch-id: a1e7c1b85d8795b11f43238e44117949942a81ad
+prerequisite-patch-id: 29ac109d88fac7c14f9828813220b268cd575c13
+prerequisite-patch-id: 9800b36c323d296970fb2d27ff91d709d8cf3043
+prerequisite-patch-id: 83f56b782879738650bbb8d8ecee20db456602a2
+prerequisite-patch-id: f4ad05152fe975b8dbdfb3b9702f1bb5bc36688a
+prerequisite-patch-id: 242ca6680adf6c44dba96689559bf85cd5d70b49
+prerequisite-patch-id: 7ad8e7715a61573139e4f4d572a3ce93d3fbe676
+prerequisite-patch-id: f411cfbee385a1845b18ab28d828f175b29da3d3
+prerequisite-patch-id: 61338cadd623f115ee97189466227aeed28f66ba
+prerequisite-patch-id: acf7789b5fdbadc78b1f69faa9feffe2b088228d
+prerequisite-patch-id: d883e4e4a7bc7aabf3ddd03c96cbdb7da62d6677
+prerequisite-patch-id: 187321612e9964909d1276c0040a4e6b9a4ef660
+prerequisite-patch-id: 3fc7925d7c4fe9d71a151577ef6c71867dc4818f
+prerequisite-patch-id: ab7d1d16415bf38d3a8eff44d8b9cdd6ee8fb343
+prerequisite-patch-id: f6bc02dfffc2aa412d48d811ca53d23efe718e90
+prerequisite-patch-id: 2fa462b455232a5dc73e5dd806398b0008789f0f
+prerequisite-patch-id: b57e5f17e260058660e27460a0ba6a4fe648c4e3
+prerequisite-patch-id: 53dd5c70589bd2aea7b705f44e62aecfce6cd6af
+prerequisite-patch-id: 0ab2e6ef645de3d2eda9fe08093916eaf466814e
+prerequisite-patch-id: f1de73031f2196aaedcccc9a688771c0babaa719
+prerequisite-patch-id: 15e8bf6ffedaf735129708f18abed6709e7a4fcd
+prerequisite-patch-id: cbb610d94edefa4cd9ea7b23b4b9196d5fb0ef3c
+prerequisite-patch-id: 06252e7db4737c18624e12a51e020453b55f0803
+prerequisite-patch-id: 5c839d744dc057c85ded8d594d2725e131135c1b
+prerequisite-patch-id: 584052d0e7cc3d6d6c686adaf36b949a55c85eaf
+prerequisite-patch-id: 47845baadfbd1f0c4c75664cec9b904712c12c2c
+prerequisite-patch-id: a715c409b06349268fb6e7ee04446b20c3c77421
+prerequisite-patch-id: 528628126ec57177b1eb65458d625f2b749c6d05
+prerequisite-patch-id: 18acb78bd2cd61eba7ca3cd30872438bbcaec2d0
+prerequisite-patch-id: cf8ae580dabee6c1ac5d39b840ff9e79da94891c
+prerequisite-patch-id: 10f75bea20aad811ebed9f77ec318c809d749bcf
+prerequisite-patch-id: b4aff197d4f4fea15d9e5ec4b378d205c0508a92
+prerequisite-patch-id: 712c88186cb694bc281e6aae6b1cd8817a4de648
+prerequisite-patch-id: d0a7df4ea2f283becb3e866f2004770b0d6a15ba
+prerequisite-patch-id: c2a0caa1d5dade4f9e01b9bedc6263b4476a1fa5
+prerequisite-patch-id: bf02518ff9b6a9e37261931327fe63098848c725
+prerequisite-patch-id: e935d265cfbcfd86ac393332015c5a16e262df1e
+prerequisite-patch-id: 4a788fe6705dc0a26dd03a519a49c3789cd88692
+prerequisite-patch-id: c6c6f95c6b77b495f0a3b85bf7caf08e57305fb0
+prerequisite-patch-id: 5935eaa74f4fccb4d729a63835b5ac9a7d39ba47
+prerequisite-patch-id: b6da18d6cbb05b138aabc2ba00900d28a97078da
+prerequisite-patch-id: fed8177c75ad71fc949da31499bc480677b25fbf
+prerequisite-patch-id: 39391eb6a6a0e73b63ed1dfd961d9d4c2b4d39a8
+prerequisite-patch-id: ce8cbbf4aa41cbf4d7482d14baea36b341185598
+prerequisite-patch-id: aacef6ad9acbc75c6d5ca3b5f388084b0f581f1c
+prerequisite-patch-id: a4ff7bcf270c555e375616daae7dffbf3f2bbfcd
+prerequisite-patch-id: e132af6ad7b65d3df89fbc4e3019759d6ade9d4b
+prerequisite-patch-id: c1cad121d7216b143fe2ebe3ef43ff90f8976ff4
+prerequisite-patch-id: 79d34eacfec8f1a785f01152a0d555faba641ca3
+prerequisite-patch-id: ad818b0636d03824aee3f2ed93ccdca9d29cb50f
+prerequisite-patch-id: ed50d55ca6c08b28b8273076274a2ade31172f65
+prerequisite-patch-id: fb2ebe3140e9bb04f8d004dfb6ef74345119baa6
+prerequisite-patch-id: bf19ce5abc9d10a735fab08797328758377389f0
+prerequisite-patch-id: c9b87c1302bde8e24868dc102339cdd9f52d44fe
+prerequisite-patch-id: 3a31b68770f39259868b797633b62b996fe9648a
+prerequisite-patch-id: 46a3f88d3497f35723b0d67e9667624e2db0aab5
+prerequisite-patch-id: 54c2a7041199909e5e4112b0a9d74df2733323e2
+prerequisite-patch-id: 22cfe6479e10f9a4190d37cc9ec9f8b0393f9dbe
+prerequisite-patch-id: 8fd38cc237dce2baa34935e65c0d826c6c185528
+prerequisite-patch-id: a2acc4201c0893893946830e2710837c7be65028
+prerequisite-patch-id: 9093bb29a7e05671a2b16a24d56d6da41d002694
+prerequisite-patch-id: 462eac8528e9d63db6e44c2a730e975251b61ad5
+prerequisite-patch-id: f9e1222f1dba41c24157b455d1da6b06b99acb7c
+prerequisite-patch-id: c4f79b0de694db51ff177e491dd75b8ccc6baa46
+prerequisite-patch-id: 9fa90df071c22408f3b1d10f459cd7ba7890ee9e
+prerequisite-patch-id: 358cb3a5400a6b7864c2be2be09b5d5d7c01b856
+prerequisite-patch-id: 89e2c8ad25bcff7166c320c3944b45c07d6a0feb
+prerequisite-patch-id: 37641440edbd82c8d8ec2dff5fc3a3bf9e725dd9
+prerequisite-patch-id: 93722bdbd9d3695ffcb370298361d7f28344a300
+prerequisite-patch-id: f87ebea9ea0bce1736365cf78e26d67c6d0008e2
+prerequisite-patch-id: d04bccddf2eeed46bed954aa7a88f7ad2d20eedb
+prerequisite-patch-id: 9149dc6e726e7934618e140deb25a7e0dd476053
+prerequisite-patch-id: 1d01113caa16fb91b6dbe836d6f73108108f1908
+prerequisite-patch-id: 291f041725963cd46a8d36f1098825bda4f6bec5
+prerequisite-patch-id: f812e02e21d285a3050d88862077559dd6bc54e2
+prerequisite-patch-id: 874a8afb79bdc98c1fc85f34a3c34f4172e94f00
+prerequisite-patch-id: 67bfdaaddf613c7b057feff85153a49bdbc40c55
+prerequisite-patch-id: bb88fc325d16f005c0bc6c602691834e7f1b2e27
+prerequisite-patch-id: 1d96458df0c54b9a43b9a68d0d946c86689475d0
+prerequisite-patch-id: 2bd7832a57c212c491bb207eadf7a321603ed223
+prerequisite-patch-id: 266bcce84bb2c608ac4b825fa0ece5617c503f6f
+prerequisite-patch-id: b4b7a3fb61f5a6223c27c56d726ef94d8c9733c0
+prerequisite-patch-id: a95b2b103ef4ea14afabbc3b96b3ad7880a73a90
+prerequisite-patch-id: 266a240e897feb63bfed695ece65d2ed3fb5cfee
+prerequisite-patch-id: c24468bbdb07d77e99ad292ded2cec8fdb6e1a72
+prerequisite-patch-id: ddbd674cb13cc83420b138c26f5544793fc98f99
+prerequisite-patch-id: 3ea9392994edd0c3a0eb938ba6ca10386eeda766
+prerequisite-patch-id: 2861b61e993a1b332a88073b0cfcc84ebfaf338e
+prerequisite-patch-id: 5b3aead415ed2ccce1e52f20a03c924a4a5cc115
+prerequisite-patch-id: 3f89f3fede10106cea2a7101c1847fe67d669493
+prerequisite-patch-id: fd646c9284da27858d6ca5730afbbffa40aec21f
+prerequisite-patch-id: 49a9f22b388784f394b2f511eb1a52d53ec24655
+prerequisite-patch-id: 4ccd165d84db3429179b3405e2e4699f539b3de1
+prerequisite-patch-id: 59b09a854be40d4163b749e0e2d185c6009062aa
+prerequisite-patch-id: fc4c1498326061bfa4547e7f71f7e9bbfdebbe1b
+prerequisite-patch-id: 91f4d8d0a90bbf534f49e60dbcee4839886f2d04
+prerequisite-patch-id: b74a82cf9f3160028d7c7a37d4fcca39585cd8de
+prerequisite-patch-id: 0772aed0a10ccf52dcec2c5be9a7b51b20b5470c
+prerequisite-patch-id: af8e8d236865ca7e656b20752093c5f3b64d7915
+prerequisite-patch-id: c27b0442f92cb936378a8727304203230974451d
+prerequisite-patch-id: 4ba6e7d5b03f7601b08a9a338ecbeecf517bc78d
+prerequisite-patch-id: 18a2b83c25a8e0e2fc7b8d61e9484ab06aefa675
+prerequisite-patch-id: ef6904eac1ec9237e7aec7db38327a9ce1c3d205
+prerequisite-patch-id: 089c4c4f14d5d4fb705637dceb9efa8c14aa885c
+prerequisite-patch-id: 8b263e1a4cd05becf3f6238ab2972d56b8b74b45
+prerequisite-patch-id: e871a09bdbcd9afaa639c7d09b19b188715c0574
+prerequisite-patch-id: 36f4ce75d110ca902ee01c2fc126a7b0e5fa72c0
+prerequisite-patch-id: d9ce70a1bf740168988c907a92b8803ebd9897e1
+prerequisite-patch-id: 8650f7030f50261a79bf5f2bb680161cc2cc1ac1
+prerequisite-patch-id: 1db9ee6095b889436de432240d9a8d97fdbf60b2
+prerequisite-patch-id: 93b53c323fde464b48904eb5be56c01e19bd05c3
+prerequisite-patch-id: a9b7d8de1ca1041356219553ff95a870bde57f6b
+prerequisite-patch-id: e4a76f2f7762906324faf11fe39887f20f348505
+prerequisite-patch-id: b70671539b7827a4adfaf857c2a58cc32c82ab80
+prerequisite-patch-id: 94b7d92083818293085349c1620d957cea525fb5
+prerequisite-patch-id: 9105e6d1ee9b9969056c6c00f8d901d7401890c1
+prerequisite-patch-id: a39ce09fd668b904e8150960ef5e5cd5f4381746
+prerequisite-patch-id: 4fae01a16c6a166c07b74bc4d876bc1c5160f560
+prerequisite-patch-id: 903204094fd5531d78bdd73134ede380facc96d1
+prerequisite-patch-id: e2609b6805f4a5c9cce33c8a646a4c12f4921515
+prerequisite-patch-id: 2ff1156cf4a798489c92ded5ec04f03652cb14f6
+prerequisite-patch-id: 83f07fac6c37d48c65e185415b37f0cddf996b1b
+prerequisite-patch-id: ec924dfcc19a251959ae911f32195299a727001e
+prerequisite-patch-id: 972d9c1e6ec1b2735d1cc5d3d9fdfa8cb7efb9ea
+prerequisite-patch-id: 4e5a2191c58fd389d6f95b466b3432f4357358ac
+prerequisite-patch-id: ea7e260ed5e0fd76aa1507aa805b6f1a60fa312c
+prerequisite-patch-id: 05b8cb54b24f7d8c593a5b6e215f1d51a34db3de
+prerequisite-patch-id: bb017fddf65e9cc8786746b03654c8b434aab92e
+prerequisite-patch-id: f9fd9bf2510b75392ca70f594702354866504914
+prerequisite-patch-id: 487f16e7a32ab21215dd967b754893243723d4d1
+prerequisite-patch-id: f1227015157cea920e40002e4e29a39d3680c579
+prerequisite-patch-id: bea1fe2ac742651a95f53a720f205fe8585831e9
+prerequisite-patch-id: e7cda60bd5860193540c4fb4e34bc30dd49449e9
+prerequisite-patch-id: 27c4184b5b869b8def328c324c8477edeccf1c90
+prerequisite-patch-id: 5ab846790f389b00e759b9fdb825c5149b483bb6
+prerequisite-patch-id: 09c62a627813c29fedbd80028fdc1bbf193429cd
+prerequisite-patch-id: 79c7e64f2a00f699828226b071ec293665dad23e
+prerequisite-patch-id: 801ff0b3ca7afb7ec545e533a235702ee74ab7bf
+prerequisite-patch-id: 33249dee9cc4b2ac76fd53983a4cad5947eb7d7e
+prerequisite-patch-id: aa977729dd13986143c6a22caaefdc412a9ae7f7
+prerequisite-patch-id: f0330e7dfa229d22bf1bd6f1ecbc7ce67b5ad4f0
+prerequisite-patch-id: 341a237096676ca841e2866fbd5d868cf8f9e749
+prerequisite-patch-id: bc585e5089debfaae251692f41ea9656dcd0c4af
+prerequisite-patch-id: 12dc97f008e36b7cbd4bf4bb8d1cbbc8036778d7
+prerequisite-patch-id: 5161858e1a9cb6d97345d7e0fe4d255c58cd410f
+prerequisite-patch-id: 02326a88a8946f839f854bb34722823a70f57d04
+prerequisite-patch-id: bfbc9b15e6181dacdc3353542a2aaf3ac0b3bd02
+prerequisite-patch-id: 1ff74029a0a3b322cc1af104b6a84ba5830f0444
+prerequisite-patch-id: cfbadb3381cb5dfd7e8842d489c348109c3614e3
+prerequisite-patch-id: ba7af3380d0f0fb8472ba0a2bba97c592a5ffbc2
+prerequisite-patch-id: dd837497bc8805cdca5763243a9e4b093324fd4f
+prerequisite-patch-id: 8c9f658db14063ae32e92a3dd003851668457f45
+prerequisite-patch-id: 82a52542deb0cf51c6acfbcdbdcdfe9bb37420f2
+prerequisite-patch-id: 370fdd972a275f2455ca168d6826324217131279
+prerequisite-patch-id: 13a3336e7ee50cab53b7d2218ed3e18d437368a7
+prerequisite-patch-id: 341e2e0a975013d2df50b524d41d44df68276764
+prerequisite-patch-id: fed2efa1291dcd5c5d73a9e5f12d34264b335c65
+prerequisite-patch-id: e2d181b30925572d6e7585eb3b7fbee15f0ce50b
+prerequisite-patch-id: 8178e873a37f7ac5e22787b0e2513618e20f752b
+prerequisite-patch-id: 4821e15d45c49283aa4f141e31f88a4cb4e3e5fa
+prerequisite-patch-id: 2ed361b12c0430f8689288b9f128d97756d869de
+prerequisite-patch-id: 8a2010fa6ba8576cf728833b4af24804c96171ed
+prerequisite-patch-id: cf16c7662b81fcab9c2670023b143c96845e24ee
+prerequisite-patch-id: b0e05965280ebfaa659274d0d57ee1d97d166636
+prerequisite-patch-id: d925be1db1d3ad639356be7c2d36753a88a4d5cb
+prerequisite-patch-id: d150d21b07ba53816c56d943539e54e240695487
+prerequisite-patch-id: 0adabdeae7a8eef871ba06576b4a4b0598f55b23
+prerequisite-patch-id: ace2f71d6f6e91dd601cf3aca0f475bb815e6b64
+prerequisite-patch-id: 836cd476a013a9e03ec3232fcb82bb895207e680
+prerequisite-patch-id: 98f44a4d40a12293189d4ae74d1a2368d9a03b8f
+prerequisite-patch-id: 3a8df3984bef4c9b6fe13576338c8349a25ac9dc
+prerequisite-patch-id: 984cace8bcc066f65c61f762dc5000b598df2f1c
+prerequisite-patch-id: c7f588222830245956221bffeccd7267a7518326
+prerequisite-patch-id: 45e1936da31d1441c0398eed0baf1964ff56269f
+prerequisite-patch-id: d9d75c593cc467535669677db288bf4d6655fd9d
+prerequisite-patch-id: 8e669e7dc6db35911d65167618842277b20483bb
+prerequisite-patch-id: 02752317d3ee9bf81908e3924e2656fd0f697832
+prerequisite-patch-id: 90db1b407df2f3b6389a0b6211897a5054031b50
+prerequisite-patch-id: 9327cf480ab1441a70f71e8c12253d91ec19a217
+prerequisite-patch-id: 3f7b445784b702f2550a69aa46dcfd34828c58ea
+prerequisite-patch-id: 12408d8f783ce53d5b94dd5a6e64b4a99d097d51
+prerequisite-patch-id: 865960e3977238846cd38e0668f8418866090c84
+prerequisite-patch-id: 0a15107ed232894678d12e4f28aa89850c1fa763
+prerequisite-patch-id: af394f99aeb16e20b239b8299138ffd2745b58ae
+prerequisite-patch-id: c278989709ed8098db06e66c9342d35ef0a72d5b
+prerequisite-patch-id: 1672cdd1eda08452e13ef8dcd80454c711ba7ced
+prerequisite-patch-id: 11b0345ed1134c51092e55bf2e8c7ebed7129879
+prerequisite-patch-id: 8283dca8641f77de812fe26a35d21cc0ecc02930
+prerequisite-patch-id: f1696805b49db0d7ac99be90d11780c14e79bc8d
+prerequisite-patch-id: ce75d041bef250fe90de5558a09a6f679702eeb3
+prerequisite-patch-id: d5e82603dd69b5de31d1054c63da37c988ce7ef1
+prerequisite-patch-id: ff4e1f659c1e8b640e2584646940b293c573c6c7
+prerequisite-patch-id: d52c4ba95b74dbf3c133851bba0803508b7c9267
+prerequisite-patch-id: 4d74b4c5e7edc1351789d3677533709e263bfc2f
+prerequisite-patch-id: 53585f0ffb4fa0c518f29a7309598ad80412e82b
+prerequisite-patch-id: 9178820992b4b6930c5177957a7e559dd166c1c0
+prerequisite-patch-id: 9a8ef1b36cc9cca5d39d18ddfd30073b12a6e152
+prerequisite-patch-id: aad8f892c4333268d4a47f73eecaece3c4fc7d8b
+prerequisite-patch-id: ad3116da2c3330f833b3c5d1c274967570f17c4a
+prerequisite-patch-id: 40dba47512c9b1d39fb8e67ba3453c03e571b5ae
+prerequisite-patch-id: b554735e570508cc150b1e78b6ce8bf5a4b7d22b
+prerequisite-patch-id: 02939b52cfe6dca25d846eff393f3a51f3b53364
+prerequisite-patch-id: b62e617eba64fac37e8834e74aee0263c7d26abe
+prerequisite-patch-id: 48bb77e097faaa813a953a57377f31b3e126db0b
+prerequisite-patch-id: 5f0c85f131178f6cc9e964ccd37dd82cbff24950
+prerequisite-patch-id: 753075254e087d59c8c0f6461ce929e692ad41bb
+prerequisite-patch-id: a67a3b8bd423e2e5144f8e7649e45d7b4327a050
+prerequisite-patch-id: 859ca77190f0ecacb2f43f57e5cef33178628192
+prerequisite-patch-id: e513f98454348139620a6b842219574d0ec713ad
+prerequisite-patch-id: ba8f9ef39fe2cc344f56d5ea06aa8c7fb4244838
+prerequisite-patch-id: 2ae4ba40636845a5c1d40c26e8deb8112d49f008
+prerequisite-patch-id: e41dbf098ef651dd973ed390d8ab78ef510deaae
+prerequisite-patch-id: 84edf1a5f6c29161aadbe17ee9cd3ab754aa24c4
+prerequisite-patch-id: d426157d4b0416a522d1ed82e069749bb6ff8a00
+prerequisite-patch-id: 4e6d33402301b6f0fa306a0abe622266db7d6fbb
+prerequisite-patch-id: 2e7233e6fb17070dcb82cfd79dcef6719ed171a8
+prerequisite-patch-id: 119ad051bb49bb38ba653d2b3ba57d932178f27a
+prerequisite-patch-id: 993ace130def48765c8b969641d1f83e724a99ed
+prerequisite-patch-id: 71178ca87cbc2ffbd0b2bdff695f2fa375613699
+prerequisite-patch-id: e41ca7883658b45630982381987f7d1607e5dac2
+prerequisite-patch-id: e4736860c94c12811e54c397100f8bc51cdaaf13
+prerequisite-patch-id: ef13f2795c6bdb14f257572a655efb4210d04c00
+prerequisite-patch-id: 47ff1d3170b4fbab335e1d955280e891305f2b79
+prerequisite-patch-id: 04affc9d4a92347c84024fdd34f8beace6c8828a
+prerequisite-patch-id: da6b1ea209681cc791fcb4820c86d8337ace8b79
+prerequisite-patch-id: 4c39ec11c1c6dd3256cf9e129636b781b44da15c
+prerequisite-patch-id: 7a81375abe5a53792b4ebc4950eb3d2243355467
+prerequisite-patch-id: 609b6fb4bd1ba71a8e43ceb64e93032ec123bcef
+prerequisite-patch-id: 82ba7e775e02396cbb2f61436380cfbf2ab3efa3
+prerequisite-patch-id: 02444024c6eb44b96c5e70c0be25f15ccfa6c91b
+prerequisite-patch-id: 2e8dc8b3bc55edcf08a4c26ff2ba97c7eed58af6
+prerequisite-patch-id: fe000b44846cd761d126bdc22f738fc2bc633480
+prerequisite-patch-id: 2c89aed5cf9bb17e5d37a6a73cc9540e5e5ee2ee
+prerequisite-patch-id: 1a8031889b513aa0e4c23c74a5b892df8e0a0b57
+prerequisite-patch-id: 9e4346854924e9368a1da6294bf349e04d0f90c4
+prerequisite-patch-id: d1070aff7e13a0c53ed7f8b1d2acb0a479deed18
+prerequisite-patch-id: 839bc01393654d4fc5eaf587ff1bffc68a3c4e87
+prerequisite-patch-id: 7f304e952609daa067d13ac85afbb46f794b3083
+prerequisite-patch-id: 32ddea84a846106d3aa246e3f40dd4f142c7e970
+prerequisite-patch-id: ee7f0e0d0b9e1efe8ca70ea5bbcd24a65a918f8d
+prerequisite-patch-id: 0326f74393acad896791e3dde71e1f4f380a2aaa
+prerequisite-patch-id: 2cad836562cafa0939c86fe33d8cd09bb9ea89d1
+prerequisite-patch-id: 7e6fc0abf961e97e315d36cb5a92139af4c367ba
+prerequisite-patch-id: bf0a6d44c2360323a026f986aa01a4ed874b695c
+prerequisite-patch-id: 3aa24d0374d0f60c97501d10bf940f988f6b9f70
+prerequisite-patch-id: 285f8ca34c742d3f68aa6e547dfbe3ac115d84b1
+prerequisite-patch-id: 856c6a229d1ebedaf460164ef4d225cdbec28a46
+prerequisite-patch-id: 7b58ba6444c33c8a1bb0122deeaaeee32390c445
+prerequisite-patch-id: 2f49cfcc275a3e80d0c3aad5b160057407fb86dc
+prerequisite-patch-id: f45f61087393bb70d5137c70eaa462bd5ac480c4
+prerequisite-patch-id: f7d67e0987bb651c6f1a08810eb131b11c89e8eb
+prerequisite-patch-id: 7c3b1c3dd52c900efd95f9e49f0da025a8950ea8
+prerequisite-patch-id: 16462603cc2572d40c9fd895e78548a585f061d7
+prerequisite-patch-id: 03c059693c7593df2af2adf0f62fbf9c65972a7a
+prerequisite-patch-id: 5d5e5aa6a07f539cc18fa3b02a5efd220058663a
+prerequisite-patch-id: 6bbc0e706102c219ace6ca8a0c64cb1ecab66a23
+prerequisite-patch-id: 83d41a57394ed4a60cc5808a8462f37286b24345
+prerequisite-patch-id: 0c9c7086c853b459c15b44ccfbede43d6b5a913e
+prerequisite-patch-id: 848766dfdfde2fd6431932c2aa11bae5b931d9c9
+prerequisite-patch-id: c77e9aacb26b23f5abc93e2d62a35d10e2dc9754
+prerequisite-patch-id: c7d453e82149c2a4530872b340e6915b2d319f8e
+prerequisite-patch-id: fcda62c173d8f1f684304c8baab338350f0c3fa8
+prerequisite-patch-id: e8f1aec4189fcb1f96c1e3e6d4b78a704f713394
+prerequisite-patch-id: f687436113bb2ae41ecf1b30d8fbad17f23fd9ab
+prerequisite-patch-id: 31c32e218ede585d4c5261d9020323c57dae05d1
+prerequisite-patch-id: 3695d7e0fc1eadfb1991d3d1a945caf71ff6f3da
+prerequisite-patch-id: 8120833055318081c462f81706b163c5b2393dcc
+prerequisite-patch-id: 0feb89f0e057704fd0bed784f75b0401e2566ee4
+prerequisite-patch-id: b11112cb08d7fef22ac31a320f02ca82b9c5d207
+prerequisite-patch-id: e26f5ea38570a1d18bc1f8a6b644215fdd1fd12d
+prerequisite-patch-id: 859b0e3ce19d8e47620ed1ef7f2495f9467246de
+prerequisite-patch-id: 17cf40012848ffc39d2bef23c52b8def3cab032d
+prerequisite-patch-id: 4f3a7e3066b5cad4b288f6ffa06071c0071b76b6
+prerequisite-patch-id: 172519305f351efa41ab822274c118bce14d3ce9
+prerequisite-patch-id: d6888f6caf257a19041cca7db47a9ea385da0a44
+prerequisite-patch-id: 5a17f6e56cff8569170e0b5a989474628ffb98a0
+prerequisite-patch-id: e29f5cded78a76317da9ccc423d605638a745af4
+prerequisite-patch-id: 850ed7fea1714b8028271e433086906b385d632a
+prerequisite-patch-id: 49b9a8e7177a1bbb9678233a76ad1f60969d085d
+prerequisite-patch-id: 07706537659a33d6e3d7ea0aede91768474b4f70
+prerequisite-patch-id: d18e36155e70cdb6c3c1c8c231b8e3f4824445e7
+prerequisite-patch-id: 2059fa365bdc972977bdb57a362ad330684da06a
+prerequisite-patch-id: 31291476f3aa6a9edf3fe9682365d853ba189da6
+prerequisite-patch-id: b5375a515521128e9773934e5265e5691e3f946b
+prerequisite-patch-id: dbfcc1bd070cba5df580ba565d4ab5a3c97bb283
+prerequisite-patch-id: ca41e5dac1ba796f8edae6a85d5cb4bd22616a34
+prerequisite-patch-id: 004842af18a6e78c122e28bfc1dd8d1bd2255a91
+prerequisite-patch-id: 3ed11597aedec335925eec4176f127eadba18bcd
+prerequisite-patch-id: ec9ea0346363c735991b87e1a37787063570aadf
+prerequisite-patch-id: 40434bc6edc028aae2d9feea43020fc2ca6225dd
+prerequisite-patch-id: 789b63f99eafbe53fd83bb04126cd8453cced0f3
+prerequisite-patch-id: 4a1071a15df6f00477b4b3d9fd924e0d462c0137
+-- 
+2.30.2
+

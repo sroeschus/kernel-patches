@@ -1,0 +1,65 @@
+From 8abbad37b73d2386b14112934a5ae1bb5cfa94fa Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Mon, 29 Nov 2021 12:52:37 -0800
+Subject: [PATCH v1 0/5] io_uring: add xattr support
+
+This adds the xattr support to io_uring. The intent is to have a more
+complete support for file operations in io_uring.
+
+This change adds support for the following functions to io_uring:
+- fgetxattr
+- fsetxattr
+- getxattr
+- setxattr
+
+Patch 1: fs: make user_path_at_empty() take a struct filename
+  The user_path_at_empty filename parameter has been changed
+  from a const char user pointer to a filename struct. io_uring
+  operates on filenames.
+  In addition also the functions that call user_path_at_empty
+  in namei.c and stat.c have been modified for this change.
+
+Patch 2: fs: split off setxattr_setup function from setxattr
+  Split off the setup part of the setxattr function
+
+Patch 3: fs: split off the vfs_getxattr from getxattr
+  Split of the vfs_getxattr part from getxattr. This will
+  allow to invoke it from io_uring.
+
+Patch 4: io_uring: add fsetxattr and setxattr support
+  This adds new functions to support the fsetxattr and setxattr
+  functions.
+
+Patch 5: io_uring: add fgetxattr and getxattr support
+  This adds new functions to support the fgetxattr and getxattr
+  functions.
+
+
+There are two additional patches:
+  liburing: Add support for xattr api's.
+            This also includes the tests for the new code.
+  xfstests: Add support for io_uring xattr support.
+
+
+Stefan Roesch (5):
+  fs: make user_path_at_empty() take a struct filename
+  fs: split off setxattr_setup function from setxattr
+  fs: split off the vfs_getxattr from getxattr
+  io_uring: add fsetxattr and setxattr support
+  io_uring: add fgetxattr and getxattr support
+
+ fs/internal.h                 |  23 +++
+ fs/io_uring.c                 | 325 ++++++++++++++++++++++++++++++++++
+ fs/namei.c                    |   5 +-
+ fs/stat.c                     |   7 +-
+ fs/xattr.c                    | 114 +++++++-----
+ include/linux/namei.h         |   4 +-
+ include/uapi/linux/io_uring.h |   8 +-
+ 7 files changed, 439 insertions(+), 47 deletions(-)
+
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+base-commit: c2626d30f312afc341158e07bf088f5a23b4eeeb
+-- 
+2.30.2
+

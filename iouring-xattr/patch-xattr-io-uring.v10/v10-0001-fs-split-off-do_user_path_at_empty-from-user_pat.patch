@@ -1,0 +1,59 @@
+From 1b78d975f38a7d67605990d6a2119e8676ee6737 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Wed, 10 Nov 2021 13:52:18 -0800
+Subject: [PATCH v10 1/5] fs: split off do_user_path_at_empty from
+ user_path_at_empty()
+
+This splits off a do_user_path_at_empty function from the
+user_path_at_empty_function. This is required so it can be
+called from io_uring.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Acked-by: Christian Brauner <christian.brauner@ubuntu.com>
+---
+ fs/internal.h |  6 ++++++
+ fs/namei.c    | 10 ++++++++--
+ 2 files changed, 14 insertions(+), 2 deletions(-)
+
+diff --git a/fs/internal.h b/fs/internal.h
+index 432ea3ce76ec..afa60757d5f6 100644
+--- a/fs/internal.h
++++ b/fs/internal.h
+@@ -202,3 +202,9 @@ struct linux_dirent64;
+ 
+ int vfs_getdents(struct file *file, struct linux_dirent64 __user *dirent,
+ 		 unsigned int count, loff_t *pos);
++
++ /*
++  * fs/namei.c:
++  */
++extern int do_user_path_at_empty(int dfd, struct filename *filename,
++				unsigned int flags, struct path *path);
+diff --git a/fs/namei.c b/fs/namei.c
+index 1f9d2187c765..d988e241b32c 100644
+--- a/fs/namei.c
++++ b/fs/namei.c
+@@ -2794,12 +2794,18 @@ int path_pts(struct path *path)
+ }
+ #endif
+ 
++int do_user_path_at_empty(int dfd, struct filename *filename, unsigned int flags,
++		       struct path *path)
++{
++	return filename_lookup(dfd, filename, flags, path, NULL);
++}
++
+ int user_path_at_empty(int dfd, const char __user *name, unsigned flags,
+-		 struct path *path, int *empty)
++		struct path *path, int *empty)
+ {
+ 	struct filename *filename = getname_flags(name, flags, empty);
+-	int ret = filename_lookup(dfd, filename, flags, path, NULL);
+ 
++	int ret = do_user_path_at_empty(dfd, filename, flags, path);
+ 	putname(filename);
+ 	return ret;
+ }
+-- 
+2.30.2
+

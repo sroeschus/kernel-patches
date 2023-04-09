@@ -1,0 +1,91 @@
+From 76fd07198a9af0de9eda104175b50b29842507f9 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@fb.com>
+Date: Thu, 11 Nov 2021 09:36:59 -0800
+Subject: [PATCH v8 3/5] fs: split off do_getxattr from getxattr
+
+This splits off do_getxattr function from the getxattr
+function. This will allow io_uring to call it from its
+io worker.
+
+Signed-off-by: Stefan Roesch <shr@fb.com>
+Acked-by: Christian Brauner <christian.brauner@ubuntu.com>
+---
+ fs/internal.h |  6 ++++++
+ fs/xattr.c    | 32 ++++++++++++++++++++------------
+ 2 files changed, 26 insertions(+), 12 deletions(-)
+
+diff --git a/fs/internal.h b/fs/internal.h
+index b07df1623de6..420d0283be12 100644
+--- a/fs/internal.h
++++ b/fs/internal.h
+@@ -220,6 +220,12 @@ struct xattr_ctx {
+ };
+ 
+ 
++ssize_t do_getxattr(struct user_namespace *mnt_userns,
++		    struct dentry *d,
++		    const char *kname,
++		    void __user *value,
++		    size_t size);
++
+ int setxattr_copy(const char __user *name, struct xattr_ctx *ctx,
+ 		void **xattr_val);
+ int do_setxattr(struct user_namespace *mnt_userns, struct dentry *dentry,
+diff --git a/fs/xattr.c b/fs/xattr.c
+index dcb4f0ff7e6e..51e305db426f 100644
+--- a/fs/xattr.c
++++ b/fs/xattr.c
+@@ -684,19 +684,12 @@ SYSCALL_DEFINE5(fsetxattr, int, fd, const char __user *, name,
+ /*
+  * Extended attribute GET operations
+  */
+-static ssize_t
+-getxattr(struct user_namespace *mnt_userns, struct dentry *d,
+-	 const char __user *name, void __user *value, size_t size)
++ssize_t
++do_getxattr(struct user_namespace *mnt_userns, struct dentry *d,
++	const char *kname, void __user *value, size_t size)
+ {
+-	ssize_t error;
+ 	void *kvalue = NULL;
+-	char kname[XATTR_NAME_MAX + 1];
+-
+-	error = strncpy_from_user(kname, name, sizeof(kname));
+-	if (error == 0 || error == sizeof(kname))
+-		error = -ERANGE;
+-	if (error < 0)
+-		return error;
++	ssize_t error;
+ 
+ 	if (size) {
+ 		if (size > XATTR_SIZE_MAX)
+@@ -720,10 +713,25 @@ getxattr(struct user_namespace *mnt_userns, struct dentry *d,
+ 	}
+ 
+ 	kvfree(kvalue);
+-
+ 	return error;
+ }
+ 
++static ssize_t
++getxattr(struct user_namespace *mnt_userns, struct dentry *d,
++	 const char __user *name, void __user *value, size_t size)
++{
++	ssize_t error;
++	struct xattr_name kname;
++
++	error = strncpy_from_user(kname.name, name, sizeof(kname.name));
++	if (error == 0 || error == sizeof(kname.name))
++		error = -ERANGE;
++	if (error < 0)
++		return error;
++
++	return do_getxattr(mnt_userns, d, kname.name, value, size);
++}
++
+ static ssize_t path_getxattr(const char __user *pathname,
+ 			     const char __user *name, void __user *value,
+ 			     size_t size, unsigned int lookup_flags)
+-- 
+2.30.2
+
