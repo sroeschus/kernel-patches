@@ -1,0 +1,33 @@
+From 7fce23bf2681b80c21d8f4285c5eb844837999d5 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Fri, 14 Apr 2023 11:47:35 -0700
+Subject: [PATCH v8 0/3] *** SUBJECT HERE ***
+
+*** BLURB HERE ***
+
+Stefan Roesch (3):
+  mm: add new api to enable ksm per process
+  mm: add new KSM process and sysfs knobs
+  selftests/mm: add new selftests for KSM
+
+ Documentation/ABI/testing/sysfs-kernel-mm-ksm |   8 +
+ Documentation/admin-guide/mm/ksm.rst          |   5 +-
+ arch/s390/mm/gmap.c                           |   7 +
+ fs/proc/base.c                                |   3 +
+ include/linux/ksm.h                           |  25 ++-
+ include/linux/sched/coredump.h                |   1 +
+ include/uapi/linux/prctl.h                    |   2 +
+ kernel/sys.c                                  |  27 +++
+ mm/ksm.c                                      | 127 +++++++++++--
+ mm/mmap.c                                     |   3 +
+ tools/include/uapi/linux/prctl.h              |   2 +
+ tools/testing/selftests/mm/Makefile           |   2 +-
+ .../selftests/mm/ksm_functional_tests.c       |  90 ++++++++-
+ tools/testing/selftests/mm/ksm_tests.c        | 172 ++++++++++++++----
+ 14 files changed, 415 insertions(+), 59 deletions(-)
+
+
+base-commit: f80a6c7a37be043f7b074d1e19638675315e3566
+-- 
+2.31.1
+
