@@ -1,0 +1,63 @@
+From 37e7113d5cb4a7891e86d653e233c604b0655c8f Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 4 Jan 2023 10:09:32 -0800
+Subject: [RFC PATCH v1 04/19] mm: invoke madvise for all vmas in
+ scan_get_next_rmap_item
+
+If the new flag MMF_VM_MERGE_ANY has been set for a process, iterate
+over all the vmas and enable ksm if possible. For the vmas that can be
+ksm enabled this is only done once.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ mm/ksm.c | 20 ++++++++++++++++++--
+ 1 file changed, 18 insertions(+), 2 deletions(-)
+
+diff --git a/mm/ksm.c b/mm/ksm.c
+index 7eb891a54308..cf9e890a4f91 100644
+--- a/mm/ksm.c
++++ b/mm/ksm.c
+@@ -1013,6 +1013,7 @@ static int unmerge_and_remove_all_rmap_items(void)
+ 
+ 			mm_slot_free(mm_slot_cache, mm_slot);
+ 			clear_bit(MMF_VM_MERGEABLE, &mm->flags);
++			clear_bit(MMF_VM_MERGE_ANY, &mm->flags);
+ 			mmdrop(mm);
+ 		} else
+ 			spin_unlock(&ksm_mmlist_lock);
+@@ -2319,8 +2320,22 @@ static struct ksm_rmap_item *scan_get_next_rmap_item(struct page **page)
+ 		goto no_vmas;
+ 
+ 	for_each_vma(vmi, vma) {
+-		if (!(vma->vm_flags & VM_MERGEABLE))
+-			continue;
++		if (!(vma->vm_flags & VM_MERGEABLE)) {
++			unsigned long flags;
++
++			if (!test_bit(MMF_VM_MERGE_ANY, &mm->flags))
++				continue;
++
++			flags = vma->vm_flags;
++			/* madvise failed, use next vma */
++			if (ksm_madvise(vma, vma->vm_start, vma->vm_end, MADV_MERGEABLE, &flags))
++				continue;
++			/* vma, not supported as being mergeable */
++			if (!(flags & VM_MERGEABLE))
++				continue;
++
++			vma->vm_flags = flags;
++		}
+ 		if (ksm_scan.address < vma->vm_start)
+ 			ksm_scan.address = vma->vm_start;
+ 		if (!vma->anon_vma)
+@@ -2389,6 +2404,7 @@ static struct ksm_rmap_item *scan_get_next_rmap_item(struct page **page)
+ 
+ 		mm_slot_free(mm_slot_cache, mm_slot);
+ 		clear_bit(MMF_VM_MERGEABLE, &mm->flags);
++		clear_bit(MMF_VM_MERGE_ANY, &mm->flags);
+ 		mmap_read_unlock(mm);
+ 		mmdrop(mm);
+ 	} else {
+-- 
+2.30.2
+

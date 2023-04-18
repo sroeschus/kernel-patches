@@ -1,0 +1,53 @@
+From 4dd657d7600593d31dbaa1914740c1d238cf3616 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Mon, 27 Feb 2023 10:46:48 -0800
+Subject: [PATCH v1] prctl: add flags to enable KSM at the process level
+
+This adds two new flags to the prctl documentation: PR_SET_MEMORY_MERGE
+and PR_GET_MEMORY_MERGE. The flags allow to enable KSM (kernel samepage
+merging) at the process level and query is state.
+
+The "mm: process/cgroup ksm support" patch series has been posted to the
+mm mailing list and it enables this feature.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ man2/prctl.2 | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/man2/prctl.2 b/man2/prctl.2
+index 2212331af0e4..d10334484bf7 100644
+--- a/man2/prctl.2
++++ b/man2/prctl.2
+@@ -591,6 +591,26 @@ the current per-process machine check kill policy.
+ All unused
+ .BR prctl ()
+ arguments must be zero.
++.\" prctl PR_SET_MEMORY_MERGE
++.TP
++.BR PR_SET_MEMORY_MERGE " (since Linux 6.4)"
++Enable the KSM (kernel samepage merging) feature for this process. If
++.I arg2
++is nonzero, KSM gets enabled for this process. Child processes will inherit the
++setting.
++.IP
++The calling process must have the
++.B CAP_SYS_RESOURCE
++capability.
++.\" prctl PR_GET_MEMORY_MERGE
++.TP
++.BR PR_GET_MEMORY_MERGE " (since Linux 6.4)"
++Return (as the function result) if KSM (kernel samepage merging) has been
++enabled for this process. All unused prctl() arguments must be NULL.
++.IP
++The calling process must have the
++.B CAP_SYS_RESOURCE
++capability.
+ .\" prctl PR_SET_MM
+ .TP
+ .BR PR_SET_MM " (since Linux 3.3)"
+
+base-commit: 53a7e5dfc3554a2e8dbdfdc4504e99652e1d6382
+-- 
+2.30.2
+

@@ -1,0 +1,40 @@
+From 171e0f9fb806e5979754d2114e4ab7439e662d68 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Tue, 17 Jan 2023 16:24:21 -0800
+Subject: [RFC PATCH v2 14/19] docs: document new procfs ksm knobs
+
+Document both ksm_process_profit and ksm_merge_type proc settings.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+Reviewed-By: Bagas Sanjaya <bagasdotme@gmail.com>
+---
+ Documentation/admin-guide/mm/ksm.rst | 6 +++++-
+ 1 file changed, 5 insertions(+), 1 deletion(-)
+
+diff --git a/Documentation/admin-guide/mm/ksm.rst b/Documentation/admin-guide/mm/ksm.rst
+index 5c4daf44d79d..34f1d0396eee 100644
+--- a/Documentation/admin-guide/mm/ksm.rst
++++ b/Documentation/admin-guide/mm/ksm.rst
+@@ -218,7 +218,8 @@ several times, which are unprofitable memory consumed.
+ 			  ksm_rmap_items * sizeof(rmap_item).
+ 
+    where ksm_merging_pages is shown under the directory ``/proc/<pid>/``,
+-   and ksm_rmap_items is shown in ``/proc/<pid>/ksm_stat``.
++   and ksm_rmap_items is shown in ``/proc/<pid>/ksm_stat``. The process profit
++   is also shown in ``/proc/<pid>/ksm_stat`` as ksm_process_profit.
+ 
+ From the perspective of application, a high ratio of ``ksm_rmap_items`` to
+ ``ksm_merging_pages`` means a bad madvise-applied policy, so developers or
+@@ -229,6 +230,9 @@ so if the ``ksm_rmap_items/ksm_merging_pages`` ratio exceeds 64 on 64-bit CPU
+ or exceeds 128 on 32-bit CPU, then the app's madvise policy should be dropped,
+ because the ksm profit is approximately zero or negative.
+ 
++The ksm_merge_type in ``/proc/<pid>/ksm_stat`` shows the merge type of the
++process. Valid values are ``none``, ``madvise`` and ``process``.
++
+ Monitoring KSM events
+ =====================
+ 
+-- 
+2.30.2
+

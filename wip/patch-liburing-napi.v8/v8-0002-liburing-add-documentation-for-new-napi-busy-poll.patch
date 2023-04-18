@@ -1,0 +1,100 @@
+From 363ce60d14901da045c79451529285524c60c48f Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Tue, 1 Nov 2022 18:07:56 -0700
+Subject: [PATCH v8 2/4] liburing: add documentation for new napi busy polling
+
+This adds two man pages for the two new functions:
+- io_uring_register_nap
+- io_uring_unregister_napi
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+Reviewed-by: Ammar Faizi <ammarfaizi2@gnuweeb.org>
+---
+ man/io_uring_register_napi.3   | 40 ++++++++++++++++++++++++++++++++++
+ man/io_uring_unregister_napi.3 | 27 +++++++++++++++++++++++
+ 2 files changed, 67 insertions(+)
+ create mode 100644 man/io_uring_register_napi.3
+ create mode 100644 man/io_uring_unregister_napi.3
+
+diff --git a/man/io_uring_register_napi.3 b/man/io_uring_register_napi.3
+new file mode 100644
+index 0000000..6ce8cff
+--- /dev/null
++++ b/man/io_uring_register_napi.3
+@@ -0,0 +1,40 @@
++.\" Copyright (C) 2022 Stefan Roesch <shr@devkernel.io>
++.\"
++.\" SPDX-License-Identifier: LGPL-2.0-or-later
++.\"
++.TH io_uring_register_napi 3 "November 16, 2022" "liburing-2.4" "liburing Manual"
++.SH NAME
++io_uring_register_napi \- register NAPI busy poll settings
++.SH SYNOPSIS
++.nf
++.B #include <liburing.h>
++.PP
++.BI "int io_uring_register_napi(struct io_uring *" ring ","
++.BI "                           struct io_uring_napi *" napi)
++.PP
++.fi
++.SH DESCRIPTION
++.PP
++The
++.BR io_uring_register_napi (3)
++function registers the NAPI settings for subsequent operations. The NAPI
++settings are specified in the structure that is passed in the
++.I napi
++parameter. The structure consists of the napi timeout
++.I busy_poll_to
++(napi busy poll timeout in us) and
++.IR prefer_busy_poll .
++
++Registering a NAPI settings sets the mode when calling the function
++napi_busy_loop and corresponds to the SO_PREFER_BUSY_POLL socket
++option.
++
++NAPI busy poll can reduce the network roundtrip time.
++
++
++.SH RETURN VALUE
++On success
++.BR io_uring_register_napi (3)
++return 0. On failure they return
++.BR -errno .
++It also updates the napi structure with the current values.
+diff --git a/man/io_uring_unregister_napi.3 b/man/io_uring_unregister_napi.3
+new file mode 100644
+index 0000000..f7087ef
+--- /dev/null
++++ b/man/io_uring_unregister_napi.3
+@@ -0,0 +1,27 @@
++.\" Copyright (C) 2022 Stefan Roesch <shr@devkernel.io>
++.\"
++.\" SPDX-License-Identifier: LGPL-2.0-or-later
++.\"
++.TH io_uring_unregister_napi 3 "November 16, 2022" "liburing-2.4" "liburing Manual"
++.SH NAME
++io_uring_unregister_napi \- unregister NAPI busy poll settings
++.SH SYNOPSIS
++.nf
++.B #include <liburing.h>
++.PP
++.BI "int io_uring_unregister_napi(struct io_uring *" ring ","
++.BI "                             struct io_uring_napi *" napi)
++.PP
++.fi
++.SH DESCRIPTION
++.PP
++The
++.BR io_uring_unregister_napi (3)
++function unregisters the NAPI busy poll settings for subsequent operations.
++
++.SH RETURN VALUE
++On success
++.BR io_uring_unregister_napi (3)
++return 0. On failure they return
++.BR -errno .
++It also updates the napi structure with the current values.
+-- 
+2.30.2
+

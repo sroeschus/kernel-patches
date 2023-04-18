@@ -1,0 +1,40 @@
+From 18d919fc7c0f2621b4ee96b7fdc9bee27a60f172 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Thu, 3 Nov 2022 13:24:26 -0700
+Subject: [RFC PATCH v1 0/2] io_uring: add napi busy polling support
+
+This adds the napi busy polling support in io_uring.c. It adds a new
+napi_list to the io_ring_ctx structure. This list contains the list of
+napi_id's that are currently enabled for busy polling. This list is
+used to determine which napi id's enabled busy polling.
+
+To set the new napi busy poll timeout, a new io-uring api has been
+added. It sets the napi busy poll timeout for the corresponding ring.
+
+There is also a corresponding liburing patch series, which enables this
+feature. The name of the series is "liburing: add add api for napi busy
+poll timeout". It also contains two programs to test the this.
+
+Testing has shown that the round-trip times are reduced to 38us from
+55us by enabling napi busy polling with a busy poll timeout of 100us.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+
+Stefan Roesch (2):
+  io_uring: add napi busy polling support
+  io_uring: add api to set napi busy poll timeout.
+
+ include/linux/io_uring_types.h |   6 +
+ include/uapi/linux/io_uring.h  |   4 +
+ io_uring/io_uring.c            | 255 +++++++++++++++++++++++++++++++++
+ io_uring/napi.h                |  22 +++
+ io_uring/poll.c                |   3 +
+ io_uring/sqpoll.c              |   9 ++
+ 6 files changed, 299 insertions(+)
+ create mode 100644 io_uring/napi.h
+
+
+base-commit: 8f71a2b3f435f29b787537d1abedaa7d8ebe6647
+-- 
+2.30.2
+

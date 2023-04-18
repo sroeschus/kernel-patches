@@ -1,0 +1,44 @@
+From 662b54830090dbf0bcadc318cdfe98b5b0bce34d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Thu, 3 Nov 2022 13:13:21 -0700
+Subject: [RFC PATCH v1 0/3] liburing: add api for napi busy poll timeout 
+
+This adds two new api's to set and clear the napi busy poll timeout. The
+two new functions are called:
+- io_uring_register_busy_poll_timeout and
+- io_uring_unregister_busy_poll_timeout.
+
+The patch series also contains the documentation for the two new functions
+and two test programs. The client program is called napi-busy-poll-client
+and the server program napi-busy-poll-server. The client measures the
+roundtrip times of requests.
+
+There is also a kernel patch "io-uring: support napi busy poll" to enable
+this feature on the kernel side.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+
+Stefan Roesch (3):
+  liburing: add api to set napi busy poll timeout
+  liburing: add documentation for new napi busy polling
+  liburing: add test programs for napi busy poll
+
+ man/io_uring_register_napi.3    |  35 +++
+ man/io_uring_unregister_napi.3  |  26 ++
+ src/include/liburing.h          |   3 +
+ src/include/liburing/io_uring.h |   4 +
+ src/register.c                  |  12 +
+ test/Makefile                   |   2 +
+ test/napi-busy-poll-client.c    | 419 ++++++++++++++++++++++++++++++++
+ test/napi-busy-poll-server.c    | 371 ++++++++++++++++++++++++++++
+ 8 files changed, 872 insertions(+)
+ create mode 100644 man/io_uring_register_napi.3
+ create mode 100644 man/io_uring_unregister_napi.3
+ create mode 100644 test/napi-busy-poll-client.c
+ create mode 100644 test/napi-busy-poll-server.c
+
+
+base-commit: 4915f2af869876d892a1f591ee2c21be21c6fc5c
+-- 
+2.30.2
+

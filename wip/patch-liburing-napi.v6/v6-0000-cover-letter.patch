@@ -1,0 +1,80 @@
+From 08109d6e9d55bc4f5a5887d910bfa81620590488 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Fri, 3 Feb 2023 10:57:53 -0800
+Subject: [PATCH v6 0/4] liburing: add api for napi busy poll
+
+This adds two new api's to set/clear the napi busy poll settings. The two
+new functions are called:
+- io_uring_register_napi
+- io_uring_unregister_napi
+
+The patch series also contains the documentation for the two new functions
+and two example programs. The client program is called napi-busy-poll-client
+and the server program napi-busy-poll-server. The client measures the
+roundtrip times of requests.
+
+There is also a kernel patch "io-uring: support napi busy poll" to enable
+this feature on the kernel side.
+
+Changes:
+- V6:
+  - Check return value of unregister napi call and verify that busy poll
+    timeout and prefer busy poll return the expected values.
+- V5:
+  - Fixes to documentation.
+  - Correct opcode for unregister call
+  - Initialize napi structure in example programs
+  - Address tab issues in recordRTT()
+- V4:
+  - Modify functions to use a structure to pass the napi busy poll settings
+    to the kernel.
+  - Return previous values when returning from the above functions.
+  - Rename the functions and remove one function (no longer needed as the
+    data is passed as a structure)
+- V3:
+  - Updated liburing.map file
+  - Moved example programs from the test directory to the example directory.
+    The two example programs don't fit well in the test category and need to
+    be run from separate hosts.
+  - Added the io_uring_register_napi_prefer_busy_poll API.
+  - Added the call to io_uring_register_napi_prefer_busy_poll to the example
+    programs
+  - Updated the documentation
+- V2:
+  - Updated the liburing.map file for the two new functions.
+    (added a 2.4 section)
+  - Added a description of the new feature to the changelog file
+  - Fixed the indentation of the longopts structure
+  - Used defined exit constants
+  - Fixed encodeUserData to support 32 bit builds
+
+
+
+Stefan Roesch (4):
+  liburing: add api to set napi busy poll settings
+  liburing: add documentation for new napi busy polling
+  liburing: add example programs for napi busy poll
+  liburing: update changelog with new feature
+
+ .gitignore                       |   2 +
+ CHANGELOG                        |   1 +
+ examples/Makefile                |   2 +
+ examples/napi-busy-poll-client.c | 451 +++++++++++++++++++++++++++++++
+ examples/napi-busy-poll-server.c | 386 ++++++++++++++++++++++++++
+ man/io_uring_register_napi.3     |  40 +++
+ man/io_uring_unregister_napi.3   |  27 ++
+ src/include/liburing.h           |   3 +
+ src/include/liburing/io_uring.h  |  12 +
+ src/liburing.map                 |   3 +
+ src/register.c                   |  12 +
+ 11 files changed, 939 insertions(+)
+ create mode 100644 examples/napi-busy-poll-client.c
+ create mode 100644 examples/napi-busy-poll-server.c
+ create mode 100644 man/io_uring_register_napi.3
+ create mode 100644 man/io_uring_unregister_napi.3
+
+
+base-commit: d32d53b65377d846635387ce6c1cd2ed0d700f92
+-- 
+2.30.2
+

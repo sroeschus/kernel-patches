@@ -1,0 +1,137 @@
+From 7ddd2f345c5ea1ec40a694930dd96f0b97720f49 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Tue, 1 Nov 2022 18:07:56 -0700
+Subject: [RFC PATCH v3 2/4] liburing: add documentation for new napi busy
+ polling
+
+This adds two man pages for the two new functions:
+- io_uring_register_napi_busy_poll_timeout
+- io_uring_unregister_napi_busy_poll_timeout
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ ...io_uring_register_napi_busy_poll_timeout.3 | 35 +++++++++++++++++++
+ man/io_uring_register_napi_prefer_busy_poll.3 | 35 +++++++++++++++++++
+ ..._uring_unregister_napi_busy_poll_timeout.3 | 26 ++++++++++++++
+ 3 files changed, 96 insertions(+)
+ create mode 100644 man/io_uring_register_napi_busy_poll_timeout.3
+ create mode 100644 man/io_uring_register_napi_prefer_busy_poll.3
+ create mode 100644 man/io_uring_unregister_napi_busy_poll_timeout.3
+
+diff --git a/man/io_uring_register_napi_busy_poll_timeout.3 b/man/io_uring_register_napi_busy_poll_timeout.3
+new file mode 100644
+index 0000000..3acce60
+--- /dev/null
++++ b/man/io_uring_register_napi_busy_poll_timeout.3
+@@ -0,0 +1,35 @@
++.\" Copyright (C) 2022 Stefan Roesch <shr@devkernel.io>
++.\"
++.\" SPDX-License-Identifier: LGPL-2.0-or-later
++.\"
++.TH io_uring_register_napi_busy_poll_timeout 3 "November 10, 2022" "liburing-2.4" "liburing Manual"
++.SH NAME
++io_uring_register_napi_busy_poll_timeout \- register NAPI busy poll timeout
++.SH SYNOPSIS
++.nf
++.B #include <liburing.h>
++.PP
++.BI "int io_uring_register_napi_busy_poll_timeout(struct io_uring *" ring ","
++.BI "                                             unsigned int " timeout)
++.PP
++.fi
++.SH DESCRIPTION
++.PP
++The
++.BR io_uring_register_napi_busy_poll_timeout (3)
++function registers the NAPI busy poll
++.I timeout
++for subsequent operations.
++
++Registering a NAPI busy poll timeout is a requirement to be able to use
++NAPI busy polling. The other way to enable NAPI busy polling is to set the
++proc setting /proc/sys/net/core/busy_poll.
++
++NAPI busy poll can reduce the network roundtrip time.
++
++
++.SH RETURN VALUE
++On success
++.BR io_uring_register_napi_busy_poll_timeout (3)
++return 0. On failure they return
++.BR -errno .
+diff --git a/man/io_uring_register_napi_prefer_busy_poll.3 b/man/io_uring_register_napi_prefer_busy_poll.3
+new file mode 100644
+index 0000000..713840e
+--- /dev/null
++++ b/man/io_uring_register_napi_prefer_busy_poll.3
+@@ -0,0 +1,35 @@
++.\" Copyright (C) 2022 Stefan Roesch <shr@devkernel.io>
++.\"
++.\" SPDX-License-Identifier: LGPL-2.0-or-later
++.\"
++.TH io_uring_register_napi_prefer_busy_poll 3 "November 11, 2022" "liburing-2.4" "liburing Manual"
++.SH NAME
++io_uring_register_napi_prefer_busy_poll \- register NAPI prefer busy poll setting
++.SH SYNOPSIS
++.nf
++.B #include <liburing.h>
++.PP
++.BI "int io_uring_register_napi_prefer_busy_poll(struct io_uring *" ring ","
++.BI "                                            bool " prefer_busy_poll)
++.PP
++.fi
++.SH DESCRIPTION
++.PP
++The
++.BR io_uring_register_napi_prefer_busy_poll (3)
++function registers the NAPI
++.I prefer_busy_poll
++for subsequent operations.
++
++Registering a NAPI prefer busy poll seeting sets the mode when calling the
++function napi_busy_loop and corresponds to the SO_PREFER_BUSY_POLL socket
++option.
++
++NAPI prefer busy poll can help in reducng the network roundtrip time.
++
++
++.SH RETURN VALUE
++On success
++.BR io_uring_register_napi_prefer_busy_poll (3)
++return 0. On failure they return
++.BR -errno .
+diff --git a/man/io_uring_unregister_napi_busy_poll_timeout.3 b/man/io_uring_unregister_napi_busy_poll_timeout.3
+new file mode 100644
+index 0000000..666e006
+--- /dev/null
++++ b/man/io_uring_unregister_napi_busy_poll_timeout.3
+@@ -0,0 +1,26 @@
++.\" Copyright (C) 2022 Stefan Roesch <shr@devkernel.io>
++.\"
++.\" SPDX-License-Identifier: LGPL-2.0-or-later
++.\"
++.TH io_uring_unregister_napi_busy_poll_timeout 3 "November 10, 2022" "liburing-2.4" "liburing Manual"
++.SH NAME
++io_uring_unregister_napi_busy_poll_timeout \- unregister NAPI busy poll timeout
++.SH SYNOPSIS
++.nf
++.B #include <liburing.h>
++.PP
++.BI "int io_uring_unregister_napi_busy_poll_timeout(struct io_uring *" ring ")
++.PP
++.fi
++.SH DESCRIPTION
++.PP
++The
++.BR io_uring_unregister_napi_busy_poll_timeout (3)
++function unregisters the NAPI busy poll
++for subsequent operations.
++
++.SH RETURN VALUE
++On success
++.BR io_uring_unregister_napi_busy_poll_timeout (3)
++return 0. On failure they return
++.BR -errno .
+-- 
+2.30.2
+

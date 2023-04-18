@@ -1,0 +1,27 @@
+From 32184555a7b705d9618eed780d93563079d8f015 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 4 Jan 2023 09:39:03 -0800
+Subject: [RFC PATCH v2 01/19] mm: add new flag to enable ksm per process
+
+This introduces the new flag MMF_VM_MERGE_ANY flag. When this flag is
+set, kernel samepage merging (ksm) gets enabled for all vma's of a
+process.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/linux/sched/coredump.h | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/include/linux/sched/coredump.h b/include/linux/sched/coredump.h
+index 0e17ae7fbfd3..0ee96ea7a0e9 100644
+--- a/include/linux/sched/coredump.h
++++ b/include/linux/sched/coredump.h
+@@ -90,4 +90,5 @@ static inline int get_dumpable(struct mm_struct *mm)
+ #define MMF_INIT_MASK		(MMF_DUMPABLE_MASK | MMF_DUMP_FILTER_MASK |\
+ 				 MMF_DISABLE_THP_MASK | MMF_HAS_MDWE_MASK)
+ 
++#define MMF_VM_MERGE_ANY	29
+ #endif /* _LINUX_SCHED_COREDUMP_H */
+-- 
+2.30.2
+

@@ -1,0 +1,48 @@
+From 683f1d2529edafca24761fdef1355a9162e093a4 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 4 Jan 2023 10:29:58 -0800
+Subject: [RFC PATCH v1 07/19] mm: add prctl option to query if process enabled
+ ksm
+
+This adds a new option to the prctl system call to query if ksm has been
+enabled for a process.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/uapi/linux/prctl.h | 1 +
+ kernel/sys.c               | 9 +++++++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/include/uapi/linux/prctl.h b/include/uapi/linux/prctl.h
+index e2fbde4ac688..b8ba85f18e43 100644
+--- a/include/uapi/linux/prctl.h
++++ b/include/uapi/linux/prctl.h
+@@ -285,4 +285,5 @@ struct prctl_mm_map {
+ # define PR_SET_VMA_ANON_NAME		0
+ 
+ #define PR_SET_MEMORY_MERGE		65
++#define PR_GET_MEMORY_MERGE		66
+ #endif /* _LINUX_PRCTL_H */
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 446abf39921e..9f51e3a2c79d 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -2641,6 +2641,15 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
+ 			__ksm_exit(me->mm, MMF_VM_MERGE_ANY);
+ 		}
+ 		break;
++	case PR_GET_MEMORY_MERGE:
++		if (!capable(CAP_SYS_RESOURCE))
++			return -EPERM;
++
++		if (arg2 || arg3 || arg4 || arg5)
++			return -EINVAL;
++
++		error = !!test_bit(MMF_VM_MERGE_ANY, &me->mm->flags);
++		break;
+ #endif
+ 	default:
+ 		error = -EINVAL;
+-- 
+2.30.2
+
