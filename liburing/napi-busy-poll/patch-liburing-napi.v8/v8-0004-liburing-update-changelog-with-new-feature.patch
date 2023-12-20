@@ -1,0 +1,28 @@
+From ae516c107815ab17256795fa78c2b77d48fcd7df Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Fri, 4 Nov 2022 12:24:57 -0700
+Subject: [PATCH v8 4/4] liburing: update changelog with new feature
+
+Add a new entry to the changelog file for the napi busy poll feature.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+Acked-by: Ammar Faizi <ammarfaizi2@gnuweeb.org>
+---
+ CHANGELOG | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/CHANGELOG b/CHANGELOG
+index 0722aae..7810137 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -6,6 +6,7 @@ liburing-2.4 release
+ - Add io_uring_prep_msg_ring_cqe_flags() function.
+ - Deprecate --nolibc configure option.
+ - CONFIG_NOLIBC is always enabled on x86-64, x86, and aarch64.
++- Support for napi busy polling
+ 
+ liburing-2.3 release
+ 
+-- 
+2.30.2
+

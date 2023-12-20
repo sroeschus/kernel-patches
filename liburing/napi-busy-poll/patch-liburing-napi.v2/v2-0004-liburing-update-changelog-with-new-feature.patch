@@ -1,0 +1,26 @@
+From d25072a426e70631808e0db34d65541422e90296 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Fri, 4 Nov 2022 12:24:57 -0700
+Subject: [RFC PATCH v2 4/4] liburing: update changelog with new feature
+
+Add a new entry to the changelog file for the napi busy poll feature.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ CHANGELOG | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/CHANGELOG b/CHANGELOG
+index 09511af..1db0269 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -1,3 +1,6 @@
++liburing-2.4 release
++- Support for napi busy polling
++
+ liburing-2.3 release
+ 
+ - Support non-libc build for aarch64.
+-- 
+2.30.2
+

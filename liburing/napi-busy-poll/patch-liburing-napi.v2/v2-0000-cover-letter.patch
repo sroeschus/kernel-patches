@@ -1,0 +1,57 @@
+From d25072a426e70631808e0db34d65541422e90296 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Mon, 7 Nov 2022 09:27:44 -0800
+Subject: [RFC PATCH v2 0/4] liburing: add api for napi busy poll timeout 
+
+This adds two new api's to set and clear the napi busy poll timeout. The
+two new functions are called:
+- io_uring_register_busy_poll_timeout and
+- io_uring_unregister_busy_poll_timeout.
+
+The patch series also contains the documentation for the two new functions
+and two test programs. The client program is called napi-busy-poll-client
+and the server program napi-busy-poll-server. The client measures the
+roundtrip times of requests.
+
+There is also a kernel patch "io-uring: support napi busy poll" to enable
+this feature on the kernel side.
+
+Changes:
+- V2:
+  - Updated the liburing.map file for the two new functions.
+    (added a 2.4 section)
+  - Added a description of the new feature to the changelog file
+  - Fixed the indentation of the longopts structure
+  - Used defined exit constants
+  - Fixed encodeUserData to support 32 bit builds
+
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+
+Stefan Roesch (4):
+  liburing: add api to set napi busy poll timeout
+  liburing: add documentation for new napi busy polling
+  liburing: add test programs for napi busy poll
+  liburing: update changelog with new feature
+
+ CHANGELOG                       |   3 +
+ man/io_uring_register_napi.3    |  35 +++
+ man/io_uring_unregister_napi.3  |  26 ++
+ src/include/liburing.h          |   4 +
+ src/include/liburing/io_uring.h |   4 +
+ src/liburing.map                |   8 +
+ src/register.c                  |  15 ++
+ test/Makefile                   |   2 +
+ test/napi-busy-poll-client.c    | 422 ++++++++++++++++++++++++++++++++
+ test/napi-busy-poll-server.c    | 372 ++++++++++++++++++++++++++++
+ 10 files changed, 891 insertions(+)
+ create mode 100644 man/io_uring_register_napi.3
+ create mode 100644 man/io_uring_unregister_napi.3
+ create mode 100644 test/napi-busy-poll-client.c
+ create mode 100644 test/napi-busy-poll-server.c
+
+
+base-commit: 754bc068ec482c5338a07dd74b7d3892729bb847
+-- 
+2.30.2
+

@@ -1,0 +1,69 @@
+From b217cf3ccc6eb7c9e5886ed6e50047134b14fa93 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Tue, 1 Nov 2022 17:47:15 -0700
+Subject: [RFC PATCH v1 1/3] liburing: add api to set napi busy poll timeout
+
+This adds the two functions to register and unregister the napi busy
+poll timeout:
+- io_uring_register_busy_poll_timeout
+- io_uring_unregister_busy_poll_timeout
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ src/include/liburing.h          |  3 +++
+ src/include/liburing/io_uring.h |  4 ++++
+ src/register.c                  | 12 ++++++++++++
+ 3 files changed, 19 insertions(+)
+
+diff --git a/src/include/liburing.h b/src/include/liburing.h
+index 12a703f..ef2510e 100644
+--- a/src/include/liburing.h
++++ b/src/include/liburing.h
+@@ -235,6 +235,9 @@ int io_uring_register_sync_cancel(struct io_uring *ring,
+ int io_uring_register_file_alloc_range(struct io_uring *ring,
+ 					unsigned off, unsigned len);
+ 
++int io_uring_register_busy_poll_timeout(struct io_uring *ring, unsigned int to);
++int io_uring_unregister_busy_poll_timeout(struct io_uring *ring);
++
+ int io_uring_get_events(struct io_uring *ring);
+ int io_uring_submit_and_get_events(struct io_uring *ring);
+ 
+diff --git a/src/include/liburing/io_uring.h b/src/include/liburing/io_uring.h
+index a3e0920..0919d9e 100644
+--- a/src/include/liburing/io_uring.h
++++ b/src/include/liburing/io_uring.h
+@@ -499,6 +499,10 @@ enum {
+ 	/* register a range of fixed file slots for automatic slot allocation */
+ 	IORING_REGISTER_FILE_ALLOC_RANGE	= 25,
+ 
++	/* set/clear busy poll timeout */
++	IORING_REGISTER_NAPI_BUSY_POLL_TIMEOUT	= 26,
++	IORING_UNREGISTER_NAPI_BUSY_POLL_TIMEOUT= 27,
++
+ 	/* this goes last */
+ 	IORING_REGISTER_LAST
+ };
+diff --git a/src/register.c b/src/register.c
+index e849825..c18e072 100644
+--- a/src/register.c
++++ b/src/register.c
+@@ -367,3 +367,15 @@ int io_uring_register_file_alloc_range(struct io_uring *ring,
+ 				       IORING_REGISTER_FILE_ALLOC_RANGE, &range,
+ 				       0);
+ }
++
++int io_uring_register_busy_poll_timeout(struct io_uring *ring, unsigned int to)
++{
++	return __sys_io_uring_register(ring->ring_fd,
++				IORING_REGISTER_NAPI_BUSY_POLL_TIMEOUT, NULL, to);
++}
++
++int io_uring_unregister_busy_poll_timeout(struct io_uring *ring)
++{
++	return __sys_io_uring_register(ring->ring_fd,
++				IORING_UNREGISTER_NAPI_BUSY_POLL_TIMEOUT, NULL, 0);
++}
+-- 
+2.30.2
+

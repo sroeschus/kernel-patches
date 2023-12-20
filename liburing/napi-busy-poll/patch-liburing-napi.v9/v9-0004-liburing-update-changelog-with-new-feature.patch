@@ -1,0 +1,28 @@
+From d894302e0459b59c391a9195f9af93cdeedb9843 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Fri, 4 Nov 2022 12:24:57 -0700
+Subject: [PATCH v9 4/4] liburing: update changelog with new feature
+
+Add a new entry to the changelog file for the napi busy poll feature.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+Acked-by: Ammar Faizi <ammarfaizi2@gnuweeb.org>
+---
+ CHANGELOG | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/CHANGELOG b/CHANGELOG
+index 71ca391..3b4144f 100644
+--- a/CHANGELOG
++++ b/CHANGELOG
+@@ -15,6 +15,7 @@ liburing-2.4 release
+   io_uring_prep_socket_direct() factor in being called with
+   IORING_FILE_INDEX_ALLOC for allocating a direct descriptor.
+ - Add io_uring_prep_sendto() function.
++- Support for napi busy polling
+ 
+ liburing-2.3 release
+ 
+-- 
+2.39.1
+
