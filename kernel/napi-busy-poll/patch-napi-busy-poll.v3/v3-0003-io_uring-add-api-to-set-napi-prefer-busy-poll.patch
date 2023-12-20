@@ -1,0 +1,67 @@
+From 2e327a81022cdc4542ab45f4ee471c26c800cb96 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Fri, 11 Nov 2022 10:30:10 -0800
+Subject: [RFC PATCH v3 3/3] io_uring: add api to set napi prefer busy poll
+
+This adds an api to register and unregister the napi prefer busy poll
+setting from liburing. To be able to use this functionality, the
+corresponding liburing patch is needed.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/uapi/linux/io_uring.h |  3 ++-
+ io_uring/io_uring.c           | 17 +++++++++++++++++
+ 2 files changed, 19 insertions(+), 1 deletion(-)
+
+diff --git a/include/uapi/linux/io_uring.h b/include/uapi/linux/io_uring.h
+index 9b5c1df0d1d8..25b91a4dc103 100644
+--- a/include/uapi/linux/io_uring.h
++++ b/include/uapi/linux/io_uring.h
+@@ -490,7 +490,8 @@ enum {
+ 	/* register a range of fixed file slots for automatic slot allocation */
+ 	IORING_REGISTER_FILE_ALLOC_RANGE	= 25,
+ 
+-	/* set/clear busy poll timeout */
++	/* set/clear busy poll settings */
++	IORING_REGISTER_NAPI_PREFER_BUSY_POLL	= 26,
+ 	IORING_REGISTER_NAPI_BUSY_POLL_TIMEOUT	= 27,
+ 
+ 	/* this goes last */
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index f6c9c9cbe0f8..eca9f7540123 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -4122,6 +4122,17 @@ static __cold int io_register_iowq_max_workers(struct io_ring_ctx *ctx,
+ 	return ret;
+ }
+ 
++static int io_register_napi_prefer_busy_poll(struct io_ring_ctx *ctx,
++					     unsigned int prefer_napi)
++{
++#ifdef CONFIG_NET_RX_BUSY_POLL
++	WRITE_ONCE(ctx->napi_prefer_busy_poll, !!prefer_napi);
++	return 0;
++#else
++	return -EINVAL;
++#endif
++}
++
+ static int io_register_napi_busy_poll_timeout(struct io_ring_ctx *ctx, unsigned int to)
+ {
+ #ifdef CONFIG_NET_RX_BUSY_POLL
+@@ -4292,6 +4303,12 @@ static int __io_uring_register(struct io_ring_ctx *ctx, unsigned opcode,
+ 			break;
+ 		ret = io_register_file_alloc_range(ctx, arg);
+ 		break;
++	case IORING_REGISTER_NAPI_PREFER_BUSY_POLL:
++		ret = -EINVAL;
++		if (arg || !nr_args)
++			break;
++		ret = io_register_napi_prefer_busy_poll(ctx, nr_args);
++		break;
+ 	case IORING_REGISTER_NAPI_BUSY_POLL_TIMEOUT:
+ 		ret = -EINVAL;
+ 		if (arg || !nr_args)
+-- 
+2.30.2
+

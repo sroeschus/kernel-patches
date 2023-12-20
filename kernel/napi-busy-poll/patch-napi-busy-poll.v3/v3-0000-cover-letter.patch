@@ -1,0 +1,56 @@
+From 2e327a81022cdc4542ab45f4ee471c26c800cb96 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Mon, 14 Nov 2022 22:40:22 -0800
+Subject: [RFC PATCH v3 0/3] io_uring: add napi busy polling support
+
+This adds the napi busy polling support in io_uring.c. It adds a new
+napi_list to the io_ring_ctx structure. This list contains the list of
+napi_id's that are currently enabled for busy polling. This list is
+used to determine which napi id's enabled busy polling.
+
+To set the new napi busy poll timeout, a new io-uring api has been
+added. It sets the napi busy poll timeout for the corresponding ring.
+
+There is also a corresponding liburing patch series, which enables this
+feature. The name of the series is "liburing: add add api for napi busy
+poll timeout". It also contains two programs to test the this.
+
+Testing has shown that the round-trip times are reduced to 38us from
+55us by enabling napi busy polling with a busy poll timeout of 100us.
+
+
+Changes:
+- V3:
+  - Refreshed to 6.1-rc5
+  - Added a new io-uring api for the prefer napi busy poll api and wire
+    it to io_napi_busy_loop().
+  - Removed the unregister (implemented as register)
+  - Added more performance results to the first commit message.
+- V2:
+  - Add missing defines if CONFIG_NET_RX_BUSY_POLL is not defined
+  - Changes signature of function io_napi_add_list to static inline
+    if CONFIG_NET_RX_BUSY_POLL is not defined
+  - define some functions as static
+
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+
+Stefan Roesch (3):
+  io_uring: add napi busy polling support
+  io_uring: add api to set napi busy poll timeout.
+  io_uring: add api to set napi prefer busy poll
+
+ include/linux/io_uring_types.h |   8 +
+ include/uapi/linux/io_uring.h  |   4 +
+ io_uring/io_uring.c            | 278 +++++++++++++++++++++++++++++++++
+ io_uring/napi.h                |  22 +++
+ io_uring/poll.c                |   3 +
+ io_uring/sqpoll.c              |  10 ++
+ 6 files changed, 325 insertions(+)
+ create mode 100644 io_uring/napi.h
+
+
+base-commit: 094226ad94f471a9f19e8f8e7140a09c2625abaa
+-- 
+2.30.2
+

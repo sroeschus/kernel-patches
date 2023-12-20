@@ -1,0 +1,101 @@
+From c1855b32f0f0935cb4dd25a0ecaee64e9f8ddcf0 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 8 Feb 2023 11:57:38 -0800
+Subject: [PATCH v8 5/7] io-uring: add sqpoll support for napi busy poll
+
+This adds the sqpoll support to the io-uring napi.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+Suggested-by: Olivier Langlois <olivier@trillion01.com>
+---
+ io_uring/napi.c   | 25 +++++++++++++++++++++++++
+ io_uring/napi.h   |  2 ++
+ io_uring/sqpoll.c |  4 ++++
+ 3 files changed, 31 insertions(+)
+
+diff --git a/io_uring/napi.c b/io_uring/napi.c
+index c9e2afae382d..038957b46a0e 100644
+--- a/io_uring/napi.c
++++ b/io_uring/napi.c
+@@ -278,4 +278,29 @@ void io_napi_end_busy_loop(struct io_ring_ctx *ctx, struct io_wait_queue *iowq,
+ 		io_napi_merge_lists(ctx, napi_list);
+ }
+ 
++/*
++ * io_napi_sqpoll_busy_poll() - busy poll loop for sqpoll
++ * @ctx: pointer to io-uring context structure
++ * @napi_list: pointer to head of napi list
++ *
++ * Splice of the napi list and execute the napi busy poll loop.
++ */
++int io_napi_sqpoll_busy_poll(struct io_ring_ctx *ctx, struct list_head *napi_list)
++{
++	int ret = 0;
++
++	spin_lock(&ctx->napi_lock);
++	list_splice_init(&ctx->napi_list, napi_list);
++	spin_unlock(&ctx->napi_lock);
++
++	if (!list_empty(napi_list) &&
++	    READ_ONCE(ctx->napi_busy_poll_to) > 0 &&
++	    io_napi_busy_loop(napi_list, ctx->napi_prefer_busy_poll)) {
++		io_napi_merge_lists(ctx, napi_list);
++		ret = 1;
++	}
++
++	return ret;
++}
++
+ #endif
+diff --git a/io_uring/napi.h b/io_uring/napi.h
+index 0672592cfb79..23a6df32805f 100644
+--- a/io_uring/napi.h
++++ b/io_uring/napi.h
+@@ -23,6 +23,7 @@ void io_napi_adjust_busy_loop_timeout(struct io_ring_ctx *ctx,
+ 			struct timespec64 *ts);
+ void io_napi_end_busy_loop(struct io_ring_ctx *ctx, struct io_wait_queue *iowq,
+ 			struct list_head *napi_list);
++int io_napi_sqpoll_busy_poll(struct io_ring_ctx *ctx, struct list_head *napi_list);
+ 
+ #else
+ 
+@@ -43,6 +44,7 @@ static inline void io_napi_add(struct io_kiocb *req)
+ #define io_napi_setup_busy_loop(ctx, iowq, napi_list) do {} while (0)
+ #define io_napi_adjust_busy_loop_timeout(ctx, iowq, napi_list, ts) do {} while (0)
+ #define io_napi_end_busy_loop(ctx, iowq, napi_list) do {} while (0)
++#define io_napi_sqpoll_busy_poll(ctx, napi_list) (0)
+ 
+ #endif
+ 
+diff --git a/io_uring/sqpoll.c b/io_uring/sqpoll.c
+index 0119d3f1a556..90fdbd87434a 100644
+--- a/io_uring/sqpoll.c
++++ b/io_uring/sqpoll.c
+@@ -15,6 +15,7 @@
+ #include <uapi/linux/io_uring.h>
+ 
+ #include "io_uring.h"
++#include "napi.h"
+ #include "sqpoll.h"
+ 
+ #define IORING_SQPOLL_CAP_ENTRIES_VALUE 8
+@@ -168,6 +169,7 @@ static int __io_sq_thread(struct io_ring_ctx *ctx, bool cap_entries)
+ {
+ 	unsigned int to_submit;
+ 	int ret = 0;
++	NAPI_LIST_HEAD(local_napi_list);
+ 
+ 	to_submit = io_sqring_entries(ctx);
+ 	/* if we're handling multiple rings, cap submit size for fairness */
+@@ -193,6 +195,8 @@ static int __io_sq_thread(struct io_ring_ctx *ctx, bool cap_entries)
+ 			ret = io_submit_sqes(ctx, to_submit);
+ 		mutex_unlock(&ctx->uring_lock);
+ 
++		ret += io_napi_sqpoll_busy_poll(ctx, &local_napi_list);
++
+ 		if (to_submit && wq_has_sleeper(&ctx->sqo_sq_wait))
+ 			wake_up(&ctx->sqo_sq_wait);
+ 		if (creds)
+-- 
+2.30.2
+

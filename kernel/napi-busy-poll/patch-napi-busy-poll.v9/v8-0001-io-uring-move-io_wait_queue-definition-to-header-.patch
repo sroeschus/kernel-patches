@@ -1,0 +1,88 @@
+From cdec675efe4b7dcdeb6debd1985a54361c175757 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 8 Feb 2023 11:17:36 -0800
+Subject: [PATCH v8 1/7] io-uring: move io_wait_queue definition to header file
+
+This moves the definition of the io_wait_queue structure to the header
+file so it can be also used from other files.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ io_uring/io_uring.c | 21 ---------------------
+ io_uring/io_uring.h | 22 ++++++++++++++++++++++
+ 2 files changed, 22 insertions(+), 21 deletions(-)
+
+diff --git a/io_uring/io_uring.c b/io_uring/io_uring.c
+index 0e42160a3051..5d6aa783fb97 100644
+--- a/io_uring/io_uring.c
++++ b/io_uring/io_uring.c
+@@ -2468,33 +2468,12 @@ int io_submit_sqes(struct io_ring_ctx *ctx, unsigned int nr)
+ 	return ret;
+ }
+ 
+-struct io_wait_queue {
+-	struct wait_queue_entry wq;
+-	struct io_ring_ctx *ctx;
+-	unsigned cq_tail;
+-	unsigned nr_timeouts;
+-	ktime_t timeout;
+-};
+-
+ static inline bool io_has_work(struct io_ring_ctx *ctx)
+ {
+ 	return test_bit(IO_CHECK_CQ_OVERFLOW_BIT, &ctx->check_cq) ||
+ 	       !llist_empty(&ctx->work_llist);
+ }
+ 
+-static inline bool io_should_wake(struct io_wait_queue *iowq)
+-{
+-	struct io_ring_ctx *ctx = iowq->ctx;
+-	int dist = READ_ONCE(ctx->rings->cq.tail) - (int) iowq->cq_tail;
+-
+-	/*
+-	 * Wake up if we have enough events, or if a timeout occurred since we
+-	 * started waiting. For timeouts, we always want to return to userspace,
+-	 * regardless of event count.
+-	 */
+-	return dist >= 0 || atomic_read(&ctx->cq_timeouts) != iowq->nr_timeouts;
+-}
+-
+ static int io_wake_function(struct wait_queue_entry *curr, unsigned int mode,
+ 			    int wake_flags, void *key)
+ {
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index 2711865f1e19..021f9af37c74 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -27,6 +27,28 @@ enum {
+ 	IOU_STOP_MULTISHOT	= -ECANCELED,
+ };
+ 
++struct io_wait_queue {
++	struct wait_queue_entry wq;
++	struct io_ring_ctx *ctx;
++	unsigned cq_tail;
++	unsigned nr_timeouts;
++	ktime_t timeout;
++
++};
++
++static inline bool io_should_wake(struct io_wait_queue *iowq)
++{
++	struct io_ring_ctx *ctx = iowq->ctx;
++	int dist = READ_ONCE(ctx->rings->cq.tail) - (int) iowq->cq_tail;
++
++	/*
++	 * Wake up if we have enough events, or if a timeout occurred since we
++	 * started waiting. For timeouts, we always want to return to userspace,
++	 * regardless of event count.
++	 */
++	return dist >= 0 || atomic_read(&ctx->cq_timeouts) != iowq->nr_timeouts;
++}
++
+ struct io_uring_cqe *__io_get_cqe(struct io_ring_ctx *ctx, bool overflow);
+ bool io_req_cqe_overflow(struct io_kiocb *req);
+ int io_run_task_work_sig(struct io_ring_ctx *ctx);
+-- 
+2.30.2
+

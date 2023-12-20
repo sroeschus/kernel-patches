@@ -1,0 +1,32 @@
+From 860715f50354e6d96ed5fa5d380a8ecccca29f6b Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 8 Feb 2023 11:43:38 -0800
+Subject: [PATCH v8 3/7] io-uring: add busy poll timeout, prefer busy poll to
+ io_wait_queue
+
+This adds the two fields busy poll timeout and prefer busy poll to the
+io_wait_queue structure. They are used during the busy poll processing.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ io_uring/io_uring.h | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/io_uring/io_uring.h b/io_uring/io_uring.h
+index 021f9af37c74..2e1b8de8505a 100644
+--- a/io_uring/io_uring.h
++++ b/io_uring/io_uring.h
+@@ -34,6 +34,10 @@ struct io_wait_queue {
+ 	unsigned nr_timeouts;
+ 	ktime_t timeout;
+ 
++#ifdef CONFIG_NET_RX_BUSY_POLL
++	unsigned int napi_busy_poll_to;
++	bool napi_prefer_busy_poll;
++#endif
+ };
+ 
+ static inline bool io_should_wake(struct io_wait_queue *iowq)
+-- 
+2.30.2
+

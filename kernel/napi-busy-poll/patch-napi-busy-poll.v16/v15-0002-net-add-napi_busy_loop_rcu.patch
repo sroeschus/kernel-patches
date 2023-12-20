@@ -1,0 +1,55 @@
+From a62c57fd73cb25b1a04715f94f403e402fe0cb28 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 7 Jun 2023 10:50:49 -0700
+Subject: [PATCH v15 2/7] net: add napi_busy_loop_rcu()
+
+This adds the napi_busy_loop_rcu() function. This function assumes that
+the calling function is already holding the rcu read lock and
+napi_busy_loop() does not need to take the rcu read lock.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/net/busy_poll.h |  4 ++++
+ net/core/dev.c          | 11 +++++++++++
+ 2 files changed, 15 insertions(+)
+
+diff --git a/include/net/busy_poll.h b/include/net/busy_poll.h
+index f90f0021f5f2..622623f5740e 100644
+--- a/include/net/busy_poll.h
++++ b/include/net/busy_poll.h
+@@ -47,6 +47,10 @@ void napi_busy_loop(unsigned int napi_id,
+ 		    bool (*loop_end)(void *, unsigned long),
+ 		    void *loop_end_arg, bool prefer_busy_poll, u16 budget);
+ 
++void napi_busy_loop_rcu(unsigned int napi_id,
++			bool (*loop_end)(void *, unsigned long),
++			void *loop_end_arg, bool prefer_busy_poll, u16 budget);
++
+ #else /* CONFIG_NET_RX_BUSY_POLL */
+ static inline unsigned long net_busy_loop_on(void)
+ {
+diff --git a/net/core/dev.c b/net/core/dev.c
+index ae90265f4020..60fc54c4aa42 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -6260,6 +6260,17 @@ void __napi_busy_loop(unsigned int napi_id,
+ 		rcu_read_unlock();
+ }
+ 
++/* Warning: can exit without calling need_resched(). */
++void napi_busy_loop_rcu(unsigned int napi_id,
++			bool (*loop_end)(void *, unsigned long),
++			void *loop_end_arg, bool prefer_busy_poll, u16 budget)
++{
++	WARN_ON_ONCE(!rcu_read_lock_held());
++
++	__napi_busy_loop(napi_id, loop_end, loop_end_arg, prefer_busy_poll,
++			 budget, true);
++}
++
+ void napi_busy_loop(unsigned int napi_id,
+ 		    bool (*loop_end)(void *, unsigned long),
+ 		    void *loop_end_arg, bool prefer_busy_poll, u16 budget)
+-- 
+2.39.1
+

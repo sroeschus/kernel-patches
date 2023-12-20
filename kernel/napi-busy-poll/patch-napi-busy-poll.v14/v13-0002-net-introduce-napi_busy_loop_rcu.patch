@@ -1,0 +1,86 @@
+From c3aa5f99f148ec04820ffeeca00832699fdb49af Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 17 May 2023 14:35:07 -0700
+Subject: [PATCH v13 2/7] net: introduce napi_busy_loop_rcu()
+
+This introduces the napi_busy_loop_rcu() function. If the caller of
+napi_busy_loop() function is also taking the rcu read lock, it is possible
+that napi_busy_loop() is releasing the read lock if it invokes schedule.
+However the caller is expecting that the rcu read lock is not released
+until the function completes. This new function avoids that problem. It
+expects that the caller MUST hold the rcu_read_lock while calling this
+function.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/net/busy_poll.h |  4 ++++
+ net/core/dev.c          | 38 ++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 42 insertions(+)
+
+diff --git a/include/net/busy_poll.h b/include/net/busy_poll.h
+index f90f0021f5f2..622623f5740e 100644
+--- a/include/net/busy_poll.h
++++ b/include/net/busy_poll.h
+@@ -47,6 +47,10 @@ void napi_busy_loop(unsigned int napi_id,
+ 		    bool (*loop_end)(void *, unsigned long),
+ 		    void *loop_end_arg, bool prefer_busy_poll, u16 budget);
+ 
++void napi_busy_loop_rcu(unsigned int napi_id,
++			bool (*loop_end)(void *, unsigned long),
++			void *loop_end_arg, bool prefer_busy_poll, u16 budget);
++
+ #else /* CONFIG_NET_RX_BUSY_POLL */
+ static inline unsigned long net_busy_loop_on(void)
+ {
+diff --git a/net/core/dev.c b/net/core/dev.c
+index f4677aa20f84..51a1c70a70a2 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -6213,6 +6213,44 @@ static inline void __napi_busy_poll(struct napi_busy_poll_ctx *ctx,
+ 				LINUX_MIB_BUSYPOLLRXPACKETS, work);
+ 	local_bh_enable();
+ }
++
++/*
++ * napi_busy_loop_rcu() - busy poll (caller holds rcu read lock)
++ * @napi_id         : napi id
++ * @loop_end        : function to check for loop end
++ * @loop_end_arg    : argument for loop end function
++ * @prefer_busy_poll: prefer busy poll
++ * @budget          : budget for busy poll
++ *
++ * Warning: caller must hold rcu read lock.
++ */
++void napi_busy_loop_rcu(unsigned int napi_id,
++		    bool (*loop_end)(void *, unsigned long),
++		    void *loop_end_arg, bool prefer_busy_poll, u16 budget)
++{
++	unsigned long start_time = loop_end ? busy_loop_current_time() : 0;
++	struct napi_busy_poll_ctx ctx = {};
++
++	ctx.napi = napi_by_id(napi_id);
++	if (!ctx.napi)
++		return;
++
++	preempt_disable();
++	for (;;) {
++		__napi_busy_poll(&ctx, prefer_busy_poll, budget);
++
++		if (!loop_end || loop_end(loop_end_arg, start_time))
++			break;
++		if (unlikely(need_resched()))
++			break;
++
++		cpu_relax();
++	}
++	if (ctx.napi_poll)
++		busy_poll_stop(ctx.napi, ctx.have_poll_lock, prefer_busy_poll, budget);
++	preempt_enable();
++}
++
+ void napi_busy_loop(unsigned int napi_id,
+ 		    bool (*loop_end)(void *, unsigned long),
+ 		    void *loop_end_arg, bool prefer_busy_poll, u16 budget)
+-- 
+2.39.1
+

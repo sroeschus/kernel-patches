@@ -1,0 +1,116 @@
+From 9c7b4ea712feb163acd23a8cb742cbf4b7afbbad Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Mon, 5 Jun 2023 11:30:20 -0700
+Subject: [PATCH v14 3/8] net: split off _napi_busy_loop()
+
+This splits off the function _napi_busy_loop from the commonality of
+napi_busy_loop() and napi_busy_loop_rcu().
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ net/core/dev.c | 66 ++++++++++++++++++++++++--------------------------
+ 1 file changed, 31 insertions(+), 35 deletions(-)
+
+diff --git a/net/core/dev.c b/net/core/dev.c
+index fcd4a6a70646..2a2d9bae1eb4 100644
+--- a/net/core/dev.c
++++ b/net/core/dev.c
+@@ -6214,39 +6214,10 @@ static inline void __napi_busy_poll(struct napi_busy_poll_ctx *ctx,
+ 	local_bh_enable();
+ }
+ 
+-/*
+- * Warning: can exit without calling need_resched().
+- */
+-void napi_busy_loop_rcu(unsigned int napi_id,
+-		    bool (*loop_end)(void *, unsigned long),
+-		    void *loop_end_arg, bool prefer_busy_poll, u16 budget)
+-{
+-	unsigned long start_time = loop_end ? busy_loop_current_time() : 0;
+-	struct napi_busy_poll_ctx ctx = {};
+-
+-	ctx.napi = napi_by_id(napi_id);
+-	if (!ctx.napi)
+-		return;
+-
+-	preempt_disable();
+-	for (;;) {
+-		__napi_busy_poll(&ctx, prefer_busy_poll, budget);
+-
+-		if (!loop_end || loop_end(loop_end_arg, start_time))
+-			break;
+-		if (unlikely(need_resched()))
+-			break;
+-
+-		cpu_relax();
+-	}
+-	if (ctx.napi_poll)
+-		busy_poll_stop(ctx.napi, ctx.have_poll_lock, prefer_busy_poll, budget);
+-	preempt_enable();
+-}
+-
+-void napi_busy_loop(unsigned int napi_id,
++static void _napi_busy_loop(unsigned int napi_id,
+ 		    bool (*loop_end)(void *, unsigned long),
+-		    void *loop_end_arg, bool prefer_busy_poll, u16 budget)
++		    void *loop_end_arg, bool prefer_busy_poll, u16 budget,
++		    bool rcu)
+ {
+ 	unsigned long start_time = loop_end ? busy_loop_current_time() : 0;
+ 	struct napi_busy_poll_ctx ctx = {};
+@@ -6254,7 +6225,8 @@ void napi_busy_loop(unsigned int napi_id,
+ restart:
+ 	ctx.napi_poll = NULL;
+ 
+-	rcu_read_lock();
++	if (rcu)
++		rcu_read_lock();
+ 
+ 	ctx.napi = napi_by_id(napi_id);
+ 	if (!ctx.napi)
+@@ -6268,8 +6240,12 @@ void napi_busy_loop(unsigned int napi_id,
+ 			break;
+ 
+ 		if (unlikely(need_resched())) {
++			if (rcu)
++				break;
++
+ 			if (ctx.napi_poll)
+-				busy_poll_stop(ctx.napi, ctx.have_poll_lock, prefer_busy_poll, budget);
++				busy_poll_stop(ctx.napi, ctx.have_poll_lock,
++					       prefer_busy_poll, budget);
+ 			preempt_enable();
+ 			rcu_read_unlock();
+ 			cond_resched();
+@@ -6283,7 +6259,27 @@ void napi_busy_loop(unsigned int napi_id,
+ 		busy_poll_stop(ctx.napi, ctx.have_poll_lock, prefer_busy_poll, budget);
+ 	preempt_enable();
+ out:
+-	rcu_read_unlock();
++	if (rcu)
++		rcu_read_unlock();
++}
++
++/*
++ * Warning: can exit without calling need_resched().
++ */
++void napi_busy_loop_rcu(unsigned int napi_id,
++		    bool (*loop_end)(void *, unsigned long),
++		    void *loop_end_arg, bool prefer_busy_poll, u16 budget)
++{
++	_napi_busy_loop(napi_id, loop_end, loop_end_arg, prefer_busy_poll,
++			budget, true);
++}
++
++void napi_busy_loop(unsigned int napi_id,
++		    bool (*loop_end)(void *, unsigned long),
++		    void *loop_end_arg, bool prefer_busy_poll, u16 budget)
++{
++	_napi_busy_loop(napi_id, loop_end, loop_end_arg, prefer_busy_poll,
++			budget, false);
+ }
+ EXPORT_SYMBOL(napi_busy_loop);
+ 
+-- 
+2.39.1
+
