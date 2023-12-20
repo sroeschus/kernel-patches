@@ -1,0 +1,113 @@
+From 8b2906858cf04e25e5d8a89c7fc16870146cc900 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Tue, 19 Sep 2023 13:00:30 -0700
+Subject: [PATCH v2 2/2] mm/ksm: Test case for prctl fork/exec workflow
+
+This adds a new test case to the ksm functional tests to make sure that
+the KSM setting is inherited by the child process when doing a
+fork/exec.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ .../selftests/mm/ksm_functional_tests.c       | 62 ++++++++++++++++++-
+ 1 file changed, 61 insertions(+), 1 deletion(-)
+
+diff --git a/tools/testing/selftests/mm/ksm_functional_tests.c b/tools/testing/selftests/mm/ksm_functional_tests.c
+index 901e950f9138..daa2e250a502 100644
+--- a/tools/testing/selftests/mm/ksm_functional_tests.c
++++ b/tools/testing/selftests/mm/ksm_functional_tests.c
+@@ -26,6 +26,7 @@
+ 
+ #define KiB 1024u
+ #define MiB (1024 * KiB)
++#define FORK_EXEC_CHILD_PRG_NAME "ksm_fork_exec_child"
+ 
+ static int mem_fd;
+ static int ksm_fd;
+@@ -479,6 +480,60 @@ static void test_prctl_fork(void)
+ 	ksft_test_result_pass("PR_SET_MEMORY_MERGE value is inherited\n");
+ }
+ 
++static int ksm_fork_exec_child(void)
++{
++	/* Test if KSM is enabled for the process. */
++	int ksm = prctl(PR_GET_MEMORY_MERGE, 0, 0, 0, 0);
++	return ksm == 1;
++}
++
++static void test_prctl_fork_exec(void)
++{
++	int ret, status;
++	pid_t child_pid;
++
++	ksft_print_msg("[RUN] %s\n", __func__);
++
++	ret = prctl(PR_SET_MEMORY_MERGE, 1, 0, 0, 0);
++	if (ret < 0 && errno == EINVAL) {
++		ksft_test_result_skip("PR_SET_MEMORY_MERGE not supported\n");
++		return;
++	} else if (ret) {
++		ksft_test_result_fail("PR_SET_MEMORY_MERGE=1 failed\n");
++		return;
++	}
++
++	child_pid = fork();
++	if (child_pid == -1) {
++		ksft_test_result_skip("fork() failed\n");
++		return;
++	} else if (child_pid == 0) {
++		char *prg_name = "./ksm_functional_tests";
++		char *argv_for_program[] = { prg_name, FORK_EXEC_CHILD_PRG_NAME };
++
++		execv(prg_name, argv_for_program);
++		return;
++	}
++
++	if (waitpid(child_pid, &status, 0) > 0) {
++		if (WIFEXITED(status)) {
++			status = WEXITSTATUS(status);
++			if (status) {
++				ksft_test_result_fail("KSM not enabled\n");
++				return;
++			}
++		} else {
++			ksft_test_result_fail("program didn't terminate normally\n");
++			return;
++		}
++	} else {
++		ksft_test_result_fail("waitpid() failed\n");
++		return;
++	}
++
++	ksft_test_result_pass("PR_SET_MEMORY_MERGE value is inherited\n");
++}
++
+ static void test_prctl_unmerge(void)
+ {
+ 	const unsigned int size = 2 * MiB;
+@@ -536,9 +591,13 @@ static void test_prot_none(void)
+ 
+ int main(int argc, char **argv)
+ {
+-	unsigned int tests = 7;
++	unsigned int tests = 8;
+ 	int err;
+ 
++	if (argc > 1 && !strcmp(argv[1], FORK_EXEC_CHILD_PRG_NAME)) {
++		exit(ksm_fork_exec_child() == 1 ? 0 : 1);
++	}
++
+ #ifdef __NR_userfaultfd
+ 	tests++;
+ #endif
+@@ -576,6 +635,7 @@ int main(int argc, char **argv)
+ 
+ 	test_prctl();
+ 	test_prctl_fork();
++	test_prctl_fork_exec();
+ 	test_prctl_unmerge();
+ 
+ 	err = ksft_get_fail_cnt();
+-- 
+2.39.3
+
