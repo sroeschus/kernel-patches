@@ -1,0 +1,51 @@
+From d6cd58cbe63d84ac4a3634e733c83d31b146031f Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 4 Jan 2023 10:36:36 -0800
+Subject: [RFC PATCH v1 11/19] mm: calculate ksm process profit metric
+
+The ksm documentation mentions the process profit metric and how to
+calculate it. This adds the calculation of the metric.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/linux/ksm.h | 4 ++++
+ mm/ksm.c            | 8 ++++++++
+ 2 files changed, 12 insertions(+)
+
+diff --git a/include/linux/ksm.h b/include/linux/ksm.h
+index 7dee9604d2fd..aa759f6d9ce8 100644
+--- a/include/linux/ksm.h
++++ b/include/linux/ksm.h
+@@ -55,6 +55,10 @@ struct page *ksm_might_need_to_copy(struct page *page,
+ void rmap_walk_ksm(struct folio *folio, struct rmap_walk_control *rwc);
+ void folio_migrate_ksm(struct folio *newfolio, struct folio *folio);
+ 
++#ifdef CONFIG_PROC_FS
++long ksm_process_profit(struct mm_struct *);
++#endif /* CONFIG_PROC_FS */
++
+ #else  /* !CONFIG_KSM */
+ 
+ static inline int ksm_fork(struct mm_struct *mm, struct mm_struct *oldmm)
+diff --git a/mm/ksm.c b/mm/ksm.c
+index 17e47133952e..f055d7a99c69 100644
+--- a/mm/ksm.c
++++ b/mm/ksm.c
+@@ -2925,6 +2925,14 @@ static void wait_while_offlining(void)
+ }
+ #endif /* CONFIG_MEMORY_HOTREMOVE */
+ 
++#ifdef CONFIG_PROC_FS
++long ksm_process_profit(struct mm_struct *mm)
++{
++	return (long)mm->ksm_merging_pages * PAGE_SIZE -
++		mm->ksm_rmap_items * sizeof(struct ksm_rmap_item);
++}
++#endif /* CONFIG_PROC_FS */
++
+ #ifdef CONFIG_SYSFS
+ /*
+  * This all compiles without CONFIG_SYSFS, but is a waste of space.
+-- 
+2.30.2
+

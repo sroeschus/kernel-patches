@@ -1,0 +1,46 @@
+From 1bb55a52b0ab7d74e28eb6a3e2bea61bd8280a5d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 4 Jan 2023 10:33:07 -0800
+Subject: [RFC PATCH v1 09/19] mm: split off pages_volatile function
+
+This splits off the pages_volatile function. The next patch will use
+this function.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ mm/ksm.c | 12 +++++++++---
+ 1 file changed, 9 insertions(+), 3 deletions(-)
+
+diff --git a/mm/ksm.c b/mm/ksm.c
+index 8c32857df1a6..2b9303a7f9fd 100644
+--- a/mm/ksm.c
++++ b/mm/ksm.c
+@@ -3172,8 +3172,7 @@ static ssize_t pages_unshared_show(struct kobject *kobj,
+ }
+ KSM_ATTR_RO(pages_unshared);
+ 
+-static ssize_t pages_volatile_show(struct kobject *kobj,
+-				   struct kobj_attribute *attr, char *buf)
++static long pages_volatile(void)
+ {
+ 	long ksm_pages_volatile;
+ 
+@@ -3185,7 +3184,14 @@ static ssize_t pages_volatile_show(struct kobject *kobj,
+ 	 */
+ 	if (ksm_pages_volatile < 0)
+ 		ksm_pages_volatile = 0;
+-	return sysfs_emit(buf, "%ld\n", ksm_pages_volatile);
++
++	return ksm_pages_volatile;
++}
++
++static ssize_t pages_volatile_show(struct kobject *kobj,
++				   struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%ld\n", pages_volatile());
+ }
+ KSM_ATTR_RO(pages_volatile);
+ 
+-- 
+2.30.2
+

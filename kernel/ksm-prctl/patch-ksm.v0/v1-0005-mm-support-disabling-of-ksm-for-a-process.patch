@@ -1,0 +1,59 @@
+From bd91510f4db74a09ec78762ab9076b29ece314a8 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 4 Jan 2023 10:23:57 -0800
+Subject: [RFC PATCH v1 05/19] mm: support disabling of ksm for a process
+
+This adds the ability to disable ksm for a process if ksm has been
+enabled for the process.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ mm/ksm.c | 25 ++++++++++++++++++++++++-
+ 1 file changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/mm/ksm.c b/mm/ksm.c
+index cf9e890a4f91..3244e3ecb112 100644
+--- a/mm/ksm.c
++++ b/mm/ksm.c
+@@ -2579,14 +2579,37 @@ int __ksm_enter(struct mm_struct *mm, int flag)
+ 	return 0;
+ }
+ 
++static void unmerge_vmas(struct mm_struct *mm)
++{
++	struct vm_area_struct *vma;
++	struct vma_iterator vmi;
++
++	vma_iter_init(&vmi, mm, 0);
++
++	mmap_read_lock(mm);
++	for_each_vma(vmi, vma) {
++		if (vma->vm_flags & VM_MERGEABLE) {
++			unsigned long flags = vma->vm_flags;
++
++			if (ksm_madvise(vma, vma->vm_start, vma->vm_end, MADV_UNMERGEABLE, &flags))
++				continue;
++
++			vma->vm_flags = flags;
++		}
++	}
++	mmap_read_unlock(mm);
++}
++
+ void __ksm_exit(struct mm_struct *mm, int flag)
+ {
+ 	struct ksm_mm_slot *mm_slot;
+ 	struct mm_slot *slot;
+ 	int easy_to_free = 0;
+ 
+-	if (flag == MMF_VM_MERGE_ANY && test_bit(MMF_VM_MERGE_ANY, &mm->flags))
++	if (flag == MMF_VM_MERGE_ANY && test_bit(MMF_VM_MERGE_ANY, &mm->flags)) {
+ 		clear_bit(MMF_VM_MERGE_ANY, &mm->flags);
++		unmerge_vmas(mm);
++	}
+ 
+ 	/*
+ 	 * This process is exiting: if it's straightforward (as is the
+-- 
+2.30.2
+

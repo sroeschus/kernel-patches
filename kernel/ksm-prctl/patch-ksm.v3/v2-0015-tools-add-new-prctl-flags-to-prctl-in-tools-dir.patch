@@ -1,0 +1,27 @@
+From 3d13774c13f9d5d6c2c96921c8fbda88686cdb74 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Thu, 5 Jan 2023 09:52:47 -0800
+Subject: [RFC PATCH v2 15/19] tools: add new prctl flags to prctl in tools dir
+
+This adds the new prctl flags to the include file prct.h in the tools
+directory. This makes sure they are available for testing.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ tools/include/uapi/linux/prctl.h | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/tools/include/uapi/linux/prctl.h b/tools/include/uapi/linux/prctl.h
+index a5e06dcbba13..b8ba85f18e43 100644
+--- a/tools/include/uapi/linux/prctl.h
++++ b/tools/include/uapi/linux/prctl.h
+@@ -284,4 +284,6 @@ struct prctl_mm_map {
+ #define PR_SET_VMA		0x53564d41
+ # define PR_SET_VMA_ANON_NAME		0
+ 
++#define PR_SET_MEMORY_MERGE		65
++#define PR_GET_MEMORY_MERGE		66
+ #endif /* _LINUX_PRCTL_H */
+-- 
+2.30.2
+

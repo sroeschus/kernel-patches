@@ -1,0 +1,62 @@
+From 659f4eedaf3c6e3ca41ca23a19546e85b5cd484d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 4 Jan 2023 10:26:53 -0800
+Subject: [RFC PATCH v1 06/19] mm: add new prctl option to set ksm for a
+ process
+
+This adds a new option to enable ksm for all vmas of a process (if the
+vmas support it).
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ include/uapi/linux/prctl.h |  1 +
+ kernel/sys.c               | 16 ++++++++++++++++
+ 2 files changed, 17 insertions(+)
+
+diff --git a/include/uapi/linux/prctl.h b/include/uapi/linux/prctl.h
+index a5e06dcbba13..e2fbde4ac688 100644
+--- a/include/uapi/linux/prctl.h
++++ b/include/uapi/linux/prctl.h
+@@ -284,4 +284,5 @@ struct prctl_mm_map {
+ #define PR_SET_VMA		0x53564d41
+ # define PR_SET_VMA_ANON_NAME		0
+ 
++#define PR_SET_MEMORY_MERGE		65
+ #endif /* _LINUX_PRCTL_H */
+diff --git a/kernel/sys.c b/kernel/sys.c
+index 5fd54bf0e886..446abf39921e 100644
+--- a/kernel/sys.c
++++ b/kernel/sys.c
+@@ -15,6 +15,7 @@
+ #include <linux/highuid.h>
+ #include <linux/fs.h>
+ #include <linux/kmod.h>
++#include <linux/ksm.h>
+ #include <linux/perf_event.h>
+ #include <linux/resource.h>
+ #include <linux/kernel.h>
+@@ -2626,6 +2627,21 @@ SYSCALL_DEFINE5(prctl, int, option, unsigned long, arg2, unsigned long, arg3,
+ 	case PR_SET_VMA:
+ 		error = prctl_set_vma(arg2, arg3, arg4, arg5);
+ 		break;
++#ifdef CONFIG_KSM
++	case PR_SET_MEMORY_MERGE:
++		if (!capable(CAP_SYS_RESOURCE))
++			return -EPERM;
++
++		if (arg2) {
++			if (mmap_write_lock_killable(me->mm))
++				return -EINTR;
++			error = __ksm_enter(me->mm, MMF_VM_MERGE_ANY);
++			mmap_write_unlock(me->mm);
++		} else {
++			__ksm_exit(me->mm, MMF_VM_MERGE_ANY);
++		}
++		break;
++#endif
+ 	default:
+ 		error = -EINVAL;
+ 		break;
+-- 
+2.30.2
+

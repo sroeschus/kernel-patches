@@ -1,0 +1,50 @@
+From 2fd838a48cb6f2a511070715319b0f414415bede Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Sun, 22 Jan 2023 20:52:12 -0800
+Subject: [RFC PATCH v1 00/20] *** SUBJECT HERE ***
+
+*** BLURB HERE ***
+
+Stefan Roesch (20):
+  mm: add new flag to enable ksm per process
+  mm: add flag to __ksm_enter
+  mm: add flag to __ksm_exit call
+  mm: invoke madvise for all vmas in scan_get_next_rmap_item
+  mm: support disabling of ksm for a process
+  mm: add new prctl option to get and set ksm for a process
+  mm: add tracepoints to ksm
+  mm: split off pages_volatile function
+  mm: expose general_profit metric
+  docs: document general_profit sysfs knob
+  mm: calculate ksm process profit metric
+  mm: add ksm_merge_type() function
+  mm: expose ksm process profit metric in ksm_stat
+  mm: expose ksm merge type in ksm_stat
+  docs: document new procfs ksm knobs
+  tools: add new prctl flags to prctl in tools dir
+  selftests/vm: add KSM prctl merge test
+  selftests/vm: add KSM get merge type test
+  selftests/vm: add KSM fork test
+  selftests/vm: add two functions for debugging merge outcome
+
+ Documentation/ABI/testing/sysfs-kernel-mm-ksm |   8 +
+ Documentation/admin-guide/mm/ksm.rst          |   8 +-
+ MAINTAINERS                                   |   1 +
+ fs/proc/base.c                                |   5 +
+ include/linux/ksm.h                           |  19 +-
+ include/linux/sched/coredump.h                |   1 +
+ include/trace/events/ksm.h                    | 257 ++++++++++++++++++
+ include/uapi/linux/prctl.h                    |   2 +
+ kernel/sys.c                                  |  29 ++
+ mm/ksm.c                                      | 134 ++++++++-
+ tools/include/uapi/linux/prctl.h              |   2 +
+ tools/testing/selftests/vm/Makefile           |   3 +-
+ tools/testing/selftests/vm/ksm_tests.c        | 254 ++++++++++++++---
+ 13 files changed, 665 insertions(+), 58 deletions(-)
+ create mode 100644 include/trace/events/ksm.h
+
+
+base-commit: c1649ec55708ae42091a2f1bca1ab49ecd722d55
+-- 
+2.30.2
+
