@@ -1,0 +1,26 @@
+From 00ae13307fe58b203fae73d78bc63236bd6a0d32 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Tue, 30 May 2023 10:59:16 -0700
+Subject: [PATCH v2 2/2] mm: add anon output to smaps
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ fs/proc/task_mmu.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/fs/proc/task_mmu.c b/fs/proc/task_mmu.c
+index cb49479acd2e..df906f9a093d 100644
+--- a/fs/proc/task_mmu.c
++++ b/fs/proc/task_mmu.c
+@@ -724,6 +724,8 @@ static void show_smap_vma_flags(struct seq_file *m, struct vm_area_struct *vma)
+ 			seq_putc(m, ' ');
+ 		}
+ 	}
++	if (vma_is_anonymous(vma))
++		seq_puts(m, "anon");
+ 	seq_putc(m, '\n');
+ }
+ 
+-- 
+2.39.1
+

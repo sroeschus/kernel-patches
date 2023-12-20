@@ -1,0 +1,710 @@
+From f8d1d74bf9981b71a713f8582d828e365f53e9a3 Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Mon, 22 May 2023 11:10:53 -0700
+Subject: [PATCH v1] mm: add advisor for pages_to_scan KSM parameter
+
+The pages_to_scan parameter plays an important role on how well KSM is
+working. Currently the default value is 100. It is also mentioned this
+value is only suitable for demo purposes. Testing has shown that this
+value is not sufficient for successful usage of KSM with today's memory
+sizes. Currently the value needs to be calibrated per workload and per
+machine size. For a small number of workloads this calibration can be
+done, however for more general usage of the feature an advisor is
+needed.
+
+This patch provides an advisor mode for KSM.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+---
+ mm/ksm.c       | 440 ++++++++++++++++++++++++++++++++++++++++++++++++-
+ mm/ksm_trace.h | 114 ++++++++++++-
+ 2 files changed, 541 insertions(+), 13 deletions(-)
+
+diff --git a/mm/ksm.c b/mm/ksm.c
+index fa7f164d93da..46b532aab6b4 100644
+--- a/mm/ksm.c
++++ b/mm/ksm.c
+@@ -21,6 +21,7 @@
+ #include <linux/sched.h>
+ #include <linux/sched/mm.h>
+ #include <linux/sched/coredump.h>
++#include <linux/sched/cputime.h>
+ #include <linux/rwsem.h>
+ #include <linux/pagemap.h>
+ #include <linux/rmap.h>
+@@ -2259,7 +2260,8 @@ static struct ksm_rmap_item *scan_get_next_rmap_item(struct page **page)
+ 
+ 	mm_slot = ksm_scan.mm_slot;
+ 	if (mm_slot == &ksm_mm_head) {
+-		trace_ksm_start_scan(ksm_scan.seqnr, ksm_rmap_items);
++		trace_ksm_start_scan(ksm_scan.seqnr, ksm_rmap_items,
++				     ksm_pages_shared, ksm_pages_sharing);
+ 
+ 		/*
+ 		 * A number of pages can hang around indefinitely on per-cpu
+@@ -2412,11 +2414,239 @@ static struct ksm_rmap_item *scan_get_next_rmap_item(struct page **page)
+ 	if (mm_slot != &ksm_mm_head)
+ 		goto next_mm;
+ 
+-	trace_ksm_stop_scan(ksm_scan.seqnr, ksm_rmap_items);
++	trace_ksm_stop_scan(ksm_scan.seqnr, ksm_rmap_items,
++			    ksm_pages_shared, ksm_pages_sharing);
+ 	ksm_scan.seqnr++;
+ 	return NULL;
+ }
+ 
++#define DIFF_WRAP_AROUND(x, y) (((y) > (x)) ? (y) - (x) : (0-(x)) + (y))
++
++#define DEFAULT_MIN_PAGES_TO_SCAN	500u
++#define DEFAULT_AUTO_BOOST_FACTOR	4
++#define DEFAULT_AUTO_CHANGE_FACTOR	4
++#define DEFAULT_AUTO_CPU_PERCENT	50
++#define DEFAULT_AUTO_DIFF_PERCENT	10
++#define EWMA_WEIGHT			10
++#define FACTOR_BASE			100
++
++/* KSM auto mode. */
++static unsigned int ksm_auto_mode;
++static unsigned long ksm_auto_boost_seqnr;
++static u64 ksm_auto_next_update;
++
++static unsigned int ksm_factor		= FACTOR_BASE;
++static unsigned int ksm_boost_factor	= 1;
++static unsigned int ksm_sleeps;
++static unsigned long ksm_scanned_pages;
++static u64 ksm_scan_time;
++
++struct advisor_conf {
++	unsigned int timeout;
++	unsigned int boost_factor;
++	unsigned int change_factor;
++	unsigned int cpu_percent;
++	unsigned int diff_percent;
++};
++
++struct advisor_hist {
++	/* Number of shared pages in last cycle. */
++	long shared_pages;
++	/* Number of new pages in last cycle. */
++	long new_pages;
++	/* Number of new rmap_items in last cycle. */
++	long rmap_items;
++};
++
++struct advisor_conf advisor_conf;
++struct advisor_hist advisor_hist;
++
++static void init_advisor(void)
++{
++	advisor_conf.timeout		= 1;
++	advisor_conf.boost_factor	= DEFAULT_AUTO_BOOST_FACTOR;
++	advisor_conf.change_factor	= DEFAULT_AUTO_CHANGE_FACTOR;
++	advisor_conf.cpu_percent	= DEFAULT_AUTO_CPU_PERCENT;
++	advisor_conf.diff_percent	= DEFAULT_AUTO_DIFF_PERCENT;
++}
++
++static void init_advisor_hist(void)
++{
++	advisor_hist.shared_pages = 0;
++	advisor_hist.new_pages    = 0;
++	advisor_hist.rmap_items   = 0;
++}
++
++/* Exponentially weighted moving average. */
++static unsigned long ewma(unsigned long prev, unsigned long curr)
++{
++	return ((100 - EWMA_WEIGHT) * prev + EWMA_WEIGHT * curr) / 100;
++}
++
++static void update_boost(unsigned long rmap_items)
++{
++	long diff = (long)rmap_items - advisor_hist.rmap_items;
++	//unsigned long diff = DIFF_WRAP_AROUND(advisor_hist.rmap_items, rmap_items);
++
++	if (diff > ksm_thread_pages_to_scan / advisor_conf.change_factor) {
++		/*
++		 * Turn on boosting if there are more than ksm_auto_change_factor
++		 * new pages and enable boosting for the next 3 iterations.
++		 */
++		ksm_auto_boost_seqnr = ksm_scan.seqnr + 3;
++		ksm_boost_factor = advisor_conf.boost_factor;
++	} else if (time_after(ksm_scan.seqnr, ksm_auto_boost_seqnr) && ksm_boost_factor > 1) {
++		/* Turn off boosting. */
++		ksm_boost_factor = 1;
++	}
++}
++
++static unsigned int get_max_scan_factor(unsigned int scanned_pages,
++					 unsigned long long scan_time)
++{
++	unsigned long cpu_time;
++	unsigned long page_scan_time;
++	unsigned long max_scan_rate;
++
++	/* Calculate time per page. */
++	page_scan_time = scan_time / scanned_pages;
++
++	/* Calculate CPU time based on sleep time and cpu limit. */
++	cpu_time = (ksm_thread_sleep_millisecs * advisor_conf.cpu_percent * NSEC_PER_MSEC);
++	cpu_time /= (100 - advisor_conf.cpu_percent);
++
++	/* Calculate new max scan rate  based on cpu time. */
++	max_scan_rate = cpu_time / page_scan_time;
++
++	/* Calculate max factor for cpu usage and boost factor. */
++	trace_ksm_cpu(scanned_pages, scan_time, page_scan_time, cpu_time, max_scan_rate,
++			max_scan_rate * FACTOR_BASE / ksm_thread_pages_to_scan / ksm_boost_factor);
++
++	return max_scan_rate * FACTOR_BASE / ksm_thread_pages_to_scan / ksm_boost_factor;
++}
++
++static long compute_factor_change(long new_pages)
++{
++	return new_pages * FACTOR_BASE / advisor_hist.new_pages;
++}
++
++static void auto_mode_extended(unsigned int scanned_pages,
++			       unsigned long long scan_time)
++{
++	unsigned long rmap_items;
++	unsigned long shared_pages;
++	long new_pages;
++	unsigned int factor;
++	unsigned int diff_factor;
++	unsigned int max_factor;
++
++	factor		= ksm_factor;
++	diff_factor	= advisor_conf.diff_percent;
++	rmap_items	= ksm_rmap_items;
++	shared_pages	= ksm_pages_sharing + ksm_pages_shared;
++	new_pages	= (long)shared_pages - advisor_hist.shared_pages;
++
++	update_boost(rmap_items);
++	max_factor = get_max_scan_factor(scanned_pages, scan_time);
++
++	if (abs(new_pages - advisor_hist.new_pages) > new_pages / diff_factor ||
++	    (new_pages == 0 && factor > FACTOR_BASE)) {
++
++		if (new_pages > advisor_hist.new_pages) {
++
++			if (advisor_hist.new_pages == 0)
++				factor += 50;
++			else
++				factor += compute_factor_change(new_pages);
++
++			/* Warning: max_factor can be lower than 100. */
++			//max_factor = get_max_scan_factor(scan_pages, scan_time);
++			factor = min(max_factor, factor);
++		} else {
++			if (advisor_hist.new_pages == 0 || new_pages == 0)
++				factor = ewma(factor, 0);
++			else
++				factor -= compute_factor_change(new_pages);
++		}
++		ksm_factor = max((unsigned int)FACTOR_BASE, factor);
++	}
++	trace_ksm_auto_mode(scanned_pages, ksm_sleeps, ksm_factor, ksm_boost_factor,
++			    ksm_thread_pages_to_scan * ksm_factor * ksm_boost_factor / FACTOR_BASE,
++			    advisor_hist.new_pages, new_pages);
++
++	advisor_hist.rmap_items		= rmap_items;
++	advisor_hist.shared_pages	= shared_pages;
++	advisor_hist.new_pages		= new_pages;
++}
++
++static void auto_mode_simple(unsigned int scan_pages,
++			    unsigned long long scan_time)
++{
++	long new_pages;
++	unsigned long shared_pages;
++	unsigned int factor;
++	unsigned int min_factor;
++	unsigned int max_factor;
++
++	factor		= ksm_factor;
++	max_factor	= 10000;
++	min_factor	= 100;
++	shared_pages	= ksm_pages_sharing + ksm_pages_shared;
++	new_pages	= (long)shared_pages - advisor_hist.shared_pages;
++
++	if (new_pages * 2 > advisor_hist.new_pages) {
++		/* Double scan rate. */
++		factor *= 2;
++		if (factor > max_factor)
++			factor = max_factor;
++	} else if (new_pages == 0) {
++		/* Half the scan rate. */
++		factor /= 2;
++		factor = factor < min_factor ? min_factor : factor;
++	}
++
++	ksm_factor			= factor;
++	advisor_hist.shared_pages	= shared_pages;
++	advisor_hist.new_pages		= new_pages;
++
++	trace_ksm_auto_mode_simple(scan_pages, ksm_factor,
++				   ksm_thread_pages_to_scan * ksm_factor / FACTOR_BASE,
++				   shared_pages, new_pages);
++}
++
++static void update_auto_mode(unsigned int pages, u64 start_time, u64 end_time)
++{
++	u64 next_update = ksm_auto_next_update;
++	u64 timeout	= advisor_conf.timeout;
++
++	if (ksm_auto_mode == 0)
++		return;
++
++	ksm_scan_time += end_time - start_time;
++	ksm_scanned_pages += pages;
++
++	if (time_before64(jiffies_64, next_update))
++		return;
++
++	/* Calculate page scan rate */
++	if (ksm_auto_mode == 1)
++		auto_mode_simple(ksm_scanned_pages, ksm_scan_time);
++	else if (ksm_auto_mode == 2)
++		auto_mode_extended(ksm_scanned_pages, ksm_scan_time);
++
++	ksm_scanned_pages = 0;
++	ksm_scan_time	  = 0;
++	ksm_auto_next_update += msecs_to_jiffies(timeout * 1000);
++}
++
++static unsigned int pages_to_scan(void)
++{
++	unsigned int factor;
++
++	factor = ksm_factor * ksm_boost_factor;
++	return ksm_thread_pages_to_scan * factor / FACTOR_BASE;
++}
++
+ /**
+  * ksm_do_scan  - the ksm scanner main worker function.
+  * @scan_npages:  number of pages we want to scan before we return.
+@@ -2425,15 +2655,22 @@ static void ksm_do_scan(unsigned int scan_npages)
+ {
+ 	struct ksm_rmap_item *rmap_item;
+ 	struct page *page;
++	u64 start_time;
++	u64 end_time;
++	unsigned int npages = scan_npages;
+ 
+-	while (scan_npages-- && likely(!freezing(current))) {
++	start_time = task_sched_runtime(current);
++	while (npages-- && likely(!freezing(current))) {
+ 		cond_resched();
+ 		rmap_item = scan_get_next_rmap_item(&page);
+ 		if (!rmap_item)
+-			return;
++			break;
+ 		cmp_and_merge_page(page, rmap_item);
+ 		put_page(page);
+ 	}
++	end_time = task_sched_runtime(current);
++
++	update_auto_mode(scan_npages - npages, start_time, end_time);
+ }
+ 
+ static int ksmd_should_run(void)
+@@ -2452,7 +2689,7 @@ static int ksm_scan_thread(void *nothing)
+ 		mutex_lock(&ksm_thread_mutex);
+ 		wait_while_offlining();
+ 		if (ksmd_should_run())
+-			ksm_do_scan(ksm_thread_pages_to_scan);
++			ksm_do_scan(pages_to_scan());
+ 		mutex_unlock(&ksm_thread_mutex);
+ 
+ 		try_to_freeze();
+@@ -2462,7 +2699,10 @@ static int ksm_scan_thread(void *nothing)
+ 			wait_event_interruptible_timeout(ksm_iter_wait,
+ 				sleep_ms != READ_ONCE(ksm_thread_sleep_millisecs),
+ 				msecs_to_jiffies(sleep_ms));
++			ksm_sleeps++;
+ 		} else {
++			init_advisor_hist();
++
+ 			wait_event_freezable(ksm_thread_wait,
+ 				ksmd_should_run() || kthread_should_stop());
+ 		}
+@@ -3254,6 +3494,185 @@ static ssize_t full_scans_show(struct kobject *kobj,
+ }
+ KSM_ATTR_RO(full_scans);
+ 
++static ssize_t boost_factor_store(struct kobject *kobj,
++				  struct kobj_attribute *attr, const char *buf,
++				  size_t count)
++{
++	unsigned int factor;
++	int err;
++
++	err = kstrtouint(buf, 10, &factor);
++	if (err)
++		return -EINVAL;
++
++	ksm_boost_factor = factor;
++	return count;
++}
++
++static ssize_t boost_factor_show(struct kobject *kobj,
++				 struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", ksm_boost_factor);
++}
++KSM_ATTR(boost_factor);
++
++static ssize_t factor_show(struct kobject *kobj,
++			   struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", ksm_factor);
++}
++KSM_ATTR_RO(factor);
++
++static ssize_t auto_boost_factor_store(struct kobject *kobj,
++				       struct kobj_attribute *attr, const char *buf,
++				       size_t count)
++{
++	unsigned int factor;
++	int err;
++
++	err = kstrtouint(buf, 10, &factor);
++	if (err)
++		return -EINVAL;
++
++	advisor_conf.boost_factor = factor;
++	return count;
++}
++
++static ssize_t auto_boost_factor_show(struct kobject *kobj,
++				      struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", advisor_conf.boost_factor);
++}
++KSM_ATTR(auto_boost_factor);
++
++static ssize_t auto_change_factor_store(struct kobject *kobj,
++					struct kobj_attribute *attr, const char *buf,
++					size_t count)
++{
++	unsigned int factor;
++	int err;
++
++	err = kstrtouint(buf, 10, &factor);
++	if (err)
++		return -EINVAL;
++
++	advisor_conf.change_factor = factor;
++	return count;
++}
++
++static ssize_t auto_change_factor_show(struct kobject *kobj,
++				  struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", advisor_conf.change_factor);
++}
++KSM_ATTR(auto_change_factor);
++
++static ssize_t auto_cpu_percent_store(struct kobject *kobj,
++				      struct kobj_attribute *attr, const char *buf,
++				      size_t count)
++{
++	unsigned int cpu;
++	int err;
++
++	err = kstrtouint(buf, 10, &cpu);
++	if (err)
++		return -EINVAL;
++
++	advisor_conf.cpu_percent = cpu;
++	return count;
++}
++
++static ssize_t auto_cpu_percent_show(struct kobject *kobj,
++				     struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", advisor_conf.cpu_percent);
++}
++KSM_ATTR(auto_cpu_percent);
++
++static ssize_t auto_diff_percent_store(struct kobject *kobj,
++				       struct kobj_attribute *attr, const char *buf,
++				       size_t count)
++{
++	unsigned int percent;
++	int err;
++
++	err = kstrtouint(buf, 10, &percent);
++	if (err)
++		return -EINVAL;
++
++	advisor_conf.diff_percent = percent;
++	return count;
++}
++
++static ssize_t auto_diff_percent_show(struct kobject *kobj,
++				      struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", advisor_conf.diff_percent);
++}
++KSM_ATTR(auto_diff_percent);
++
++static ssize_t auto_mode_show(struct kobject *kobj,
++			      struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", ksm_auto_mode);
++}
++
++static ssize_t auto_mode_store(struct kobject *kobj,
++			       struct kobj_attribute *attr, const char *buf,
++			       size_t count)
++{
++	unsigned int mode;
++	int err;
++
++	err = kstrtouint(buf, 10, &mode);
++	if (err)
++		return -EINVAL;
++
++	advisor_hist.shared_pages	= 0;
++	advisor_hist.new_pages		= 0;
++	advisor_hist.rmap_items		= ksm_rmap_items;
++
++	ksm_auto_mode		= mode;
++	ksm_auto_next_update	= jiffies;
++	ksm_factor		= 100;
++
++	ksm_thread_pages_to_scan = 100;
++	if (ksm_auto_mode == 2)
++		ksm_thread_pages_to_scan = DEFAULT_MIN_PAGES_TO_SCAN;
++
++	return count;
++}
++KSM_ATTR(auto_mode);
++
++static ssize_t auto_pages_to_scan_show(struct kobject *kobj,
++			       struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", ksm_thread_pages_to_scan * ksm_boost_factor * ksm_factor);
++}
++KSM_ATTR_RO(auto_pages_to_scan);
++
++static ssize_t auto_timeout_store(struct kobject *kobj,
++				  struct kobj_attribute *attr, const char *buf,
++				  size_t count)
++{
++	unsigned int timeout;
++	int err;
++
++	err = kstrtouint(buf, 10, &timeout);
++	if (err)
++		return -EINVAL;
++
++	advisor_conf.timeout = timeout;
++	return count;
++}
++
++static ssize_t auto_timeout_show(struct kobject *kobj,
++				 struct kobj_attribute *attr, char *buf)
++{
++	return sysfs_emit(buf, "%u\n", advisor_conf.timeout);
++}
++KSM_ATTR(auto_timeout);
++
+ static struct attribute *ksm_attrs[] = {
+ 	&sleep_millisecs_attr.attr,
+ 	&pages_to_scan_attr.attr,
+@@ -3272,6 +3691,15 @@ static struct attribute *ksm_attrs[] = {
+ 	&stable_node_chains_prune_millisecs_attr.attr,
+ 	&use_zero_pages_attr.attr,
+ 	&general_profit_attr.attr,
++	&auto_boost_factor_attr.attr,
++	&auto_change_factor_attr.attr,
++	&auto_cpu_percent_attr.attr,
++	&auto_diff_percent_attr.attr,
++	&auto_mode_attr.attr,
++	&auto_pages_to_scan_attr.attr,
++	&auto_timeout_attr.attr,
++	&factor_attr.attr,
++	&boost_factor_attr.attr,
+ 	NULL,
+ };
+ 
+@@ -3290,6 +3718,8 @@ static int __init ksm_init(void)
+ 	zero_checksum = calc_checksum(ZERO_PAGE(0));
+ 	/* Default to false for backwards compatibility */
+ 	ksm_use_zero_pages = false;
++	/* Initialize default setting for auto advisor. */
++	init_advisor();
+ 
+ 	err = ksm_slab_init();
+ 	if (err)
+diff --git a/mm/ksm_trace.h b/mm/ksm_trace.h
+index 3cf8c36e08c2..b4ab4102bb44 100644
+--- a/mm/ksm_trace.h
++++ b/mm/ksm_trace.h
+@@ -18,22 +18,27 @@
+  */
+ DECLARE_EVENT_CLASS(ksm_scan_template,
+ 
+-	TP_PROTO(int seq, u32 rmap_entries),
++	TP_PROTO(int seq, u32 rmap_entries, u64 pages_shared, u64 pages_sharing),
+ 
+-	TP_ARGS(seq, rmap_entries),
++	TP_ARGS(seq, rmap_entries, pages_shared, pages_sharing),
+ 
+ 	TP_STRUCT__entry(
+ 		__field(int,	seq)
+ 		__field(u32,	rmap_entries)
++		__field(u64,	pages_shared)
++		__field(u64,	pages_sharing)
+ 	),
+ 
+ 	TP_fast_assign(
+ 		__entry->seq		= seq;
+ 		__entry->rmap_entries	= rmap_entries;
++		__entry->pages_shared	= pages_shared;
++		__entry->pages_sharing	= pages_sharing;
+ 	),
+ 
+-	TP_printk("seq %d rmap size %d",
+-			__entry->seq, __entry->rmap_entries)
++	TP_printk("seq %d rmap size %d pages shared %llu, pages sharing %llu",
++			__entry->seq, __entry->rmap_entries,
++			__entry->pages_shared, __entry->pages_sharing)
+ );
+ 
+ /**
+@@ -46,9 +51,9 @@ DECLARE_EVENT_CLASS(ksm_scan_template,
+  */
+ DEFINE_EVENT(ksm_scan_template, ksm_start_scan,
+ 
+-	TP_PROTO(int seq, u32 rmap_entries),
++	TP_PROTO(int seq, u32 rmap_entries, u64 pages_shared, u64 pages_sharing),
+ 
+-	TP_ARGS(seq, rmap_entries)
++	TP_ARGS(seq, rmap_entries, pages_shared, pages_sharing)
+ );
+ 
+ /**
+@@ -61,9 +66,9 @@ DEFINE_EVENT(ksm_scan_template, ksm_start_scan,
+  */
+ DEFINE_EVENT(ksm_scan_template, ksm_stop_scan,
+ 
+-	TP_PROTO(int seq, u32 rmap_entries),
++	TP_PROTO(int seq, u32 rmap_entries, u64 pages_shared, u64 pages_sharing),
+ 
+-	TP_ARGS(seq, rmap_entries)
++	TP_ARGS(seq, rmap_entries, pages_shared, pages_sharing)
+ );
+ 
+ /**
+@@ -246,6 +251,99 @@ TRACE_EVENT(ksm_remove_rmap_item,
+ 			__entry->pfn, __entry->rmap_item, __entry->mm)
+ );
+ 
++TRACE_EVENT(ksm_auto_mode,
++
++	TP_PROTO(u32 scan_pages, u32 sleeps, u32 factor, u32 boost_factor, u32 pages_to_scan,
++		 u64 prev_new_pages, u64 new_pages),
++
++	TP_ARGS(scan_pages, sleeps, factor, boost_factor, pages_to_scan, prev_new_pages, new_pages),
++
++	TP_STRUCT__entry(
++		__field(u32,	scan_pages)
++		__field(u32,	sleeps)
++		__field(u32,	factor)
++		__field(u32,	boost_factor)
++		__field(u32,	pages_to_scan)
++		__field(u64,	prev_new_pages)
++		__field(u64,	new_pages)
++	),
++
++	TP_fast_assign(
++		__entry->scan_pages	= scan_pages;
++		__entry->sleeps		= sleeps;
++		__entry->factor		= factor;
++		__entry->boost_factor	= boost_factor;
++		__entry->pages_to_scan	= pages_to_scan;
++		__entry->prev_new_pages = prev_new_pages;
++		__entry->new_pages	= new_pages;
++	),
++
++	TP_printk("scan_pages %u sleeps %u factor %u boost_factor %u pages_to_scan %u prev_new_pages %llu new_pages %llu (%s)",
++			__entry->scan_pages, __entry->sleeps,
++			__entry->factor, __entry->boost_factor,
++			__entry->pages_to_scan,
++			__entry->prev_new_pages, __entry->new_pages,
++			__entry->prev_new_pages < __entry->new_pages ? "G" : "S")
++);
++
++TRACE_EVENT(ksm_auto_mode_simple,
++
++	TP_PROTO(u32 scan_pages, u32 factor, u32 pages_to_scan, u64 shared_pages, u64 new_pages),
++
++	TP_ARGS(scan_pages, factor, pages_to_scan, shared_pages, new_pages),
++
++	TP_STRUCT__entry(
++		__field(u32,	scan_pages)
++		__field(u32,	factor)
++		__field(u32,	pages_to_scan)
++		__field(u64,	shared_pages)
++		__field(u64,	new_pages)
++	),
++
++	TP_fast_assign(
++		__entry->scan_pages	= scan_pages;
++		__entry->factor		= factor;
++		__entry->pages_to_scan	= pages_to_scan;
++		__entry->shared_pages	= shared_pages;
++		__entry->new_pages	= new_pages;
++	),
++
++	TP_printk("scan_pages %u factor %u pages_to_scan %u shared_pages %llu new_pages %llu",
++			__entry->scan_pages, __entry->factor, __entry->pages_to_scan,
++			__entry->shared_pages, __entry->new_pages)
++);
++
++TRACE_EVENT(ksm_cpu,
++
++	TP_PROTO(u32 scan_pages, u64 scan_time, u32 pages_scan_time, u32 cpu_time,
++		 u32 max_scan_rate, u32 factor),
++
++	TP_ARGS(scan_pages, scan_time, pages_scan_time, cpu_time, max_scan_rate, factor),
++
++	TP_STRUCT__entry(
++		__field(u32,	scan_pages)
++		__field(u64,	scan_time)
++		__field(u32,	pages_scan_time)
++		__field(u32,	cpu_time)
++		__field(u32,	max_scan_rate)
++		__field(u32,	factor)
++	),
++
++	TP_fast_assign(
++		__entry->scan_pages	 = scan_pages;
++		__entry->scan_time	 = scan_time;
++		__entry->pages_scan_time = pages_scan_time;
++		__entry->cpu_time	 = cpu_time;
++		__entry->max_scan_rate	 = max_scan_rate;
++		__entry->factor		 = factor;
++	),
++
++	TP_printk("scan_pages %u scan_time %llu pages_scan_time %u cpu_time %u max_scan_rate %u factor %u",
++			__entry->scan_pages, __entry->scan_time,
++			__entry->pages_scan_time, __entry->cpu_time,
++			__entry->max_scan_rate, __entry->factor)
++);
++
+ #endif /* _TRACE_KSM_H */
+ 
+ #undef TRACE_INCLUDE_PATH
+
+base-commit: f80a6c7a37be043f7b074d1e19638675315e3566
+prerequisite-patch-id: b0ff2159e676c9db04a60094cf65fd719d120b90
+prerequisite-patch-id: 09720f55b3b509b1cd09edbeba8bdefeb34c3b76
+prerequisite-patch-id: a4c572de4fcb5613f080c57c73deec67272de33f
+prerequisite-patch-id: 40a57aa3afcc201cda883e3a3c1eacf7b8bd2c93
+-- 
+2.39.1
+
