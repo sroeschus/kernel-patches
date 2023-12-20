@@ -1,0 +1,74 @@
+From 053c10245b2754f9095df16cf7efc41424ed2c3d Mon Sep 17 00:00:00 2001
+From: Stefan Roesch <shr@devkernel.io>
+Date: Wed, 22 Nov 2023 09:55:31 -0800
+Subject: [PATCH v2 1/2] mem: disable KSM smart scan for ksm tests
+
+This disables the "smart scan" KSM feature to make sure that the volatile
+count remains at 0.
+
+Signed-off-by: Stefan Roesch <shr@devkernel.io>
+
+Reported-by: kernel test robot <oliver.sang@intel.com>
+Closes: https://lore.kernel.org/oe-lkp/202311161132.13d8ce5a-oliver.sang@intel.com
+---
+ testcases/kernel/mem/ksm/ksm01.c | 2 ++
+ testcases/kernel/mem/ksm/ksm02.c | 2 ++
+ testcases/kernel/mem/ksm/ksm03.c | 2 ++
+ testcases/kernel/mem/ksm/ksm04.c | 2 ++
+ 4 files changed, 8 insertions(+)
+
+diff --git a/testcases/kernel/mem/ksm/ksm01.c b/testcases/kernel/mem/ksm/ksm01.c
+index bcd095865..e2d3d9e00 100644
+--- a/testcases/kernel/mem/ksm/ksm01.c
++++ b/testcases/kernel/mem/ksm/ksm01.c
+@@ -86,6 +86,8 @@ static struct tst_test test = {
+ 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
+ 		{"/sys/kernel/mm/ksm/merge_across_nodes", "1",
+ 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
++		{"/sys/kernel/mm/ksm/smart_scan", "0",
++			TST_SR_SKIP_MISSING | TST_SR_TBROK_RO},
+ 		{}
+ 	},
+ 	.needs_kconfigs = (const char *const[]){
+diff --git a/testcases/kernel/mem/ksm/ksm02.c b/testcases/kernel/mem/ksm/ksm02.c
+index bce639dce..3707de95d 100644
+--- a/testcases/kernel/mem/ksm/ksm02.c
++++ b/testcases/kernel/mem/ksm/ksm02.c
+@@ -107,6 +107,8 @@ static struct tst_test test = {
+ 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
+ 		{"/sys/kernel/mm/ksm/merge_across_nodes", "1",
+ 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
++		{"/sys/kernel/mm/ksm/smart_scan", "0",
++			TST_SR_SKIP_MISSING | TST_SR_TBROK_RO},
+ 		{}
+ 	},
+ 	.needs_kconfigs = (const char *const[]){
+diff --git a/testcases/kernel/mem/ksm/ksm03.c b/testcases/kernel/mem/ksm/ksm03.c
+index 4a733269f..cff74700d 100644
+--- a/testcases/kernel/mem/ksm/ksm03.c
++++ b/testcases/kernel/mem/ksm/ksm03.c
+@@ -89,6 +89,8 @@ static struct tst_test test = {
+ 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
+ 		{"/sys/kernel/mm/ksm/merge_across_nodes", "1",
+ 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
++		{"/sys/kernel/mm/ksm/smart_scan", "0",
++			TST_SR_SKIP_MISSING | TST_SR_TBROK_RO},
+ 		{}
+ 	},
+ 	.needs_kconfigs = (const char *const[]){
+diff --git a/testcases/kernel/mem/ksm/ksm04.c b/testcases/kernel/mem/ksm/ksm04.c
+index 4f1f2f721..9935e32d7 100644
+--- a/testcases/kernel/mem/ksm/ksm04.c
++++ b/testcases/kernel/mem/ksm/ksm04.c
+@@ -109,6 +109,8 @@ static struct tst_test test = {
+ 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
+ 		{"/sys/kernel/mm/ksm/merge_across_nodes", "1",
+ 			TST_SR_SKIP_MISSING | TST_SR_TCONF_RO},
++		{"/sys/kernel/mm/ksm/smart_scan", "0",
++			TST_SR_SKIP_MISSING | TST_SR_TBROK_RO},
+ 		{}
+ 	},
+ 	.needs_kconfigs = (const char *const[]){
+-- 
+2.39.3
+
